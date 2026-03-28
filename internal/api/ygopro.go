@@ -185,3 +185,38 @@ func (c *YGOProClient) FetchAllSets() ([]YGOProSet, error) {
 
 	return sets, nil
 }
+
+// FetchCardsBySet returns all cards in a specific set from YGOPRODECK.
+func (c *YGOProClient) FetchCardsBySet(setName string) ([]YGOProCard, error) {
+	c.rateLimiter.Wait()
+
+	req, err := http.NewRequest("GET", ygoproBaseURL+"/cardinfo.php", nil)
+	if err != nil {
+		return nil, err
+	}
+	q := req.URL.Query()
+	q.Set("cardset", setName)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching cards in set %q: %w", setName, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("card API returned status %d for set %q", resp.StatusCode, setName)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading set cards response: %w", err)
+	}
+
+	var cardResp YGOProCardResponse
+	if err := json.Unmarshal(body, &cardResp); err != nil {
+		return nil, fmt.Errorf("parsing set cards for %q: %w", setName, err)
+	}
+
+	return cardResp.Data, nil
+}
