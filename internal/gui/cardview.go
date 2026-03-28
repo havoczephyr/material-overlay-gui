@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -63,7 +64,7 @@ func (a *App) renderCardView(cd *card.Card, imgData []byte) {
 				coloredValue("ATK: ", cd.ATK, theme.ColorATK),
 			)
 			if cd.IsLink() {
-				atkDef.Add(coloredValue("  LINK: ", strings.Join(cd.LinkArrows, ", "), theme.ColorGold))
+				atkDef.Add(coloredValue("  LINK: ", strings.Join(cd.LinkArrows, ", "), theme.ColorPrimary))
 			} else {
 				atkDef.Add(coloredValue("  DEF: ", cd.DEF, theme.ColorDEF))
 			}
@@ -119,19 +120,22 @@ func (a *App) renderCardView(cd *card.Card, imgData []byte) {
 	topSplit := container.NewHSplit(topLeft, topRight)
 	topSplit.SetOffset(0.35)
 
+	// Wrap top section in a sized container for gallery animation
+	topWrapper := container.NewGridWrap(fyne.NewSize(960, 400), topSplit)
+
 	// ── Bottom: Tabbed content ──
-	tabs := a.buildCardTabs(cd)
+	tabs := a.buildCardTabs(cd, topWrapper)
 
 	// Full layout
 	fullView := container.NewBorder(
-		container.NewPadded(topSplit), nil, nil, nil,
+		container.NewPadded(topWrapper), nil, nil, nil,
 		container.NewPadded(tabs),
 	)
 
 	a.setContent(fullView)
 }
 
-func (a *App) buildCardTabs(cd *card.Card) *container.AppTabs {
+func (a *App) buildCardTabs(cd *card.Card, topWrapper *fyne.Container) *container.AppTabs {
 	// Card Text tab
 	cardTextContent := a.buildCardTextTab(cd)
 
@@ -153,9 +157,54 @@ func (a *App) buildCardTabs(cd *card.Card) *container.AppTabs {
 	)
 	tabs.SetTabLocation(container.TabLocationTop)
 
+	// Gallery animation state
+	fullHeight := float32(400)
+	collapsedHeight := float32(160)
+	wasGallery := false
+	var currentAnim *fyne.Animation
+
 	// Load tab content on selection
 	loaded := map[string]bool{"Card Text": true}
 	tabs.OnSelected = func(tab *container.TabItem) {
+		isGallery := tab.Text == "Gallery"
+
+		// Handle gallery animation
+		if isGallery && !wasGallery {
+			// Entering gallery: collapse top section
+			if currentAnim != nil {
+				currentAnim.Stop()
+			}
+			currentAnim = canvas.NewSizeAnimation(
+				fyne.NewSize(960, fullHeight),
+				fyne.NewSize(960, collapsedHeight),
+				time.Millisecond*300,
+				func(s fyne.Size) {
+					topWrapper.Layout = layout.NewGridWrapLayout(s)
+					topWrapper.Refresh()
+				},
+			)
+			currentAnim.Curve = fyne.AnimationEaseInOut
+			currentAnim.Start()
+		} else if !isGallery && wasGallery {
+			// Leaving gallery: expand top section back
+			if currentAnim != nil {
+				currentAnim.Stop()
+			}
+			currentAnim = canvas.NewSizeAnimation(
+				fyne.NewSize(960, collapsedHeight),
+				fyne.NewSize(960, fullHeight),
+				time.Millisecond*300,
+				func(s fyne.Size) {
+					topWrapper.Layout = layout.NewGridWrapLayout(s)
+					topWrapper.Refresh()
+				},
+			)
+			currentAnim.Curve = fyne.AnimationEaseInOut
+			currentAnim.Start()
+		}
+		wasGallery = isGallery
+
+		// Lazy load content
 		if loaded[tab.Text] {
 			return
 		}
@@ -226,31 +275,30 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 }
 
 func (a *App) loadTabContent(cardName, tabType string, box *fyne.Container) {
-	var text string
+	var rawText string
 	var err error
 
 	switch tabType {
 	case "tips":
-		text, err = a.svc.FetchTips(cardName)
+		rawText, err = a.svc.FetchTipsRaw(cardName)
 	case "trivia":
-		text, err = a.svc.FetchTrivia(cardName)
+		rawText, err = a.svc.FetchTriviaRaw(cardName)
 	case "rulings":
-		text, err = a.svc.FetchRulings(cardName)
+		rawText, err = a.svc.FetchRulingsRaw(cardName)
 	case "errata":
-		text, err = a.svc.FetchErrata(cardName)
+		rawText, err = a.svc.FetchErrataRaw(cardName)
 	}
 
 	box.Objects = nil
 	if err != nil {
 		box.Add(widget.NewLabel("Failed to load: " + err.Error()))
-	} else if text == "" {
+	} else if rawText == "" {
 		dimText := canvas.NewText("No "+tabType+" available for this card.", theme.ColorFGDim)
 		dimText.TextSize = 13
 		box.Add(dimText)
 	} else {
-		label := widget.NewLabel(text)
-		label.Wrapping = fyne.TextWrapWord
-		box.Add(label)
+		rt := a.wikiTextToRichText(rawText)
+		box.Add(rt)
 	}
 	box.Refresh()
 }

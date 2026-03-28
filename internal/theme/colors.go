@@ -7,10 +7,10 @@ import (
 
 // Color palette — Yu-Gi-Oh themed with material(Overlay) branding.
 var (
-	// Brand colors
-	ColorGold      = parseHex("#FFD700")
-	ColorDarkGold  = parseHex("#B8860B")
-	ColorWhite     = parseHex("#ffffff")
+	// Primary accent — teal identity
+	ColorPrimary     = parseHex("#00e5ff")
+	ColorPrimaryDark = parseHex("#00acc1")
+	ColorWhite       = parseHex("#ffffff")
 	ColorBG        = parseHex("#1c1c1c")
 	ColorBGLight   = parseHex("#262626")
 	ColorFG        = parseHex("#e0e0e0")
@@ -20,8 +20,8 @@ var (
 
 	// Decorative
 	ColorDecoBlack  = parseHex("#111111")
-	ColorDecoBright = parseHex("#00e5ff")
-	ColorDecoDark   = parseHex("#00acc1")
+	ColorDecoBright = ColorPrimary
+	ColorDecoDark   = ColorPrimaryDark
 
 	// Attribute colors
 	ColorDark   = parseHex("#9b59b6")
