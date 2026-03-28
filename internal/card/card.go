@@ -240,3 +240,152 @@ func StripWikiPageContent(s string) string {
 
 	return strings.Join(result, "\n")
 }
+
+// WikiLink represents a card reference found in wiki text.
+type WikiLink struct {
+	Start   int    // byte offset in the plain text output
+	End     int    // byte offset end in the plain text output
+	Target  string // card name to navigate to (the link target)
+	Display string // display text shown to the user
+}
+
+// CleanWikiTextPreserveLinks applies the same cleanup as StripWikiPageContent
+// but keeps [[...]] link markup intact for later parsing.
+func CleanWikiTextPreserveLinks(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	s = reRefBlock.ReplaceAllString(s, "")
+	s = reRefSelf.ReplaceAllString(s, "")
+
+	for i := 0; i < 5; i++ {
+		prev := s
+		s = reTemplate.ReplaceAllString(s, "")
+		if s == prev {
+			break
+		}
+	}
+
+	s = reTableStart.ReplaceAllString(s, "")
+	s = reTableEnd.ReplaceAllString(s, "")
+	s = reTableRowSep.ReplaceAllString(s, "")
+
+	s = reSectionHeader.ReplaceAllString(s, "$1")
+	s = reBold.ReplaceAllString(s, "$1")
+	s = reItalic.ReplaceAllString(s, "$1")
+	s = reBR.ReplaceAllString(s, "\n")
+	s = reHTML.ReplaceAllString(s, "")
+	s = html.UnescapeString(s)
+
+	// Process lines but preserve [[...]] links
+	var result []string
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "*") {
+			depth := 0
+			for _, ch := range trimmed {
+				if ch == '*' {
+					depth++
+				} else {
+					break
+				}
+			}
+			prefix := "• "
+			if depth > 1 {
+				prefix = "  • "
+			}
+			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
+		}
+
+		if strings.HasPrefix(trimmed, "!") {
+			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
+			if trimmed == "" {
+				continue
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "|") {
+			trimmed = strings.TrimSpace(trimmed[1:])
+			if trimmed == "" {
+				continue
+			}
+		}
+
+		result = append(result, trimmed)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// ParseWikiLinks extracts [[...]] links from cleaned wiki text.
+// Returns the plain text with links replaced by display text, and the link positions.
+func ParseWikiLinks(cleaned string) (string, []WikiLink) {
+	var links []WikiLink
+	var out strings.Builder
+	offset := 0
+
+	// Process pipe links first: [[target|display]]
+	// Then simple links: [[target]]
+	// We need to handle both in a single pass.
+	remaining := cleaned
+	for len(remaining) > 0 {
+		// Find next [[ marker
+		start := strings.Index(remaining, "[[")
+		if start == -1 {
+			out.WriteString(remaining)
+			break
+		}
+
+		// Write text before the link
+		out.WriteString(remaining[:start])
+		offset += start
+
+		// Find closing ]]
+		end := strings.Index(remaining[start:], "]]")
+		if end == -1 {
+			// No closing brackets - write as-is
+			out.WriteString(remaining[start:])
+			break
+		}
+		end += start // adjust to absolute position
+
+		inner := remaining[start+2 : end]
+		remaining = remaining[end+2:]
+
+		// Parse link: [[target|display]] or [[target]]
+		var target, display string
+		if pipeIdx := strings.Index(inner, "|"); pipeIdx != -1 {
+			target = strings.TrimSpace(inner[:pipeIdx])
+			display = strings.TrimSpace(inner[pipeIdx+1:])
+		} else {
+			target = strings.TrimSpace(inner)
+			display = target
+		}
+
+		// Strip anchor fragments (e.g., "Card Tips:Dark Magician#English" → "Card Tips:Dark Magician")
+		if hashIdx := strings.Index(target, "#"); hashIdx != -1 {
+			target = target[:hashIdx]
+		}
+
+		// Strip namespace prefixes for card navigation (e.g., "Card Tips:Dark Magician" → keep as-is for non-card pages)
+		linkStart := offset
+		linkEnd := offset + len(display)
+
+		links = append(links, WikiLink{
+			Start:   linkStart,
+			End:     linkEnd,
+			Target:  target,
+			Display: display,
+		})
+
+		out.WriteString(display)
+		offset += len(display)
+	}
+
+	return out.String(), links
+}

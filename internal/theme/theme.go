@@ -17,7 +17,7 @@ func (t *OverlayTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant
 	case theme.ColorNameForeground:
 		return ColorFG
 	case theme.ColorNamePrimary:
-		return ColorGold
+		return ColorPrimary
 	case theme.ColorNameButton:
 		return ColorBGLight
 	case theme.ColorNameDisabled:

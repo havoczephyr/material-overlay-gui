@@ -76,7 +76,7 @@ func coloredValue(label string, value string, valueColor color.Color) fyne.Canva
 
 // sectionHeader creates a styled section header.
 func sectionHeader(text string) fyne.CanvasObject {
-	t := canvas.NewText(text, theme.ColorGold)
+	t := canvas.NewText(text, theme.ColorPrimary)
 	t.TextSize = 16
 	t.TextStyle.Bold = true
 	return t
@@ -88,4 +88,51 @@ func placeholderImage() fyne.CanvasObject {
 	rect.SetMinSize(fyne.NewSize(250, 365))
 	rect.CornerRadius = 8
 	return rect
+}
+
+// placeholderThumb creates a small placeholder for a gallery thumbnail.
+func placeholderThumb() fyne.CanvasObject {
+	rect := canvas.NewRectangle(theme.ColorAccent)
+	rect.SetMinSize(fyne.NewSize(80, 117))
+	rect.CornerRadius = 4
+	return rect
+}
+
+// thumbnailFrame wraps an image with a border that highlights when selected.
+func thumbnailFrame(content fyne.CanvasObject, selected bool) fyne.CanvasObject {
+	borderColor := theme.ColorBGLight
+	if selected {
+		borderColor = theme.ColorPrimary
+	}
+	border := canvas.NewRectangle(borderColor)
+	border.SetMinSize(fyne.NewSize(86, 123))
+	border.CornerRadius = 4
+	return container.NewStack(border, container.NewCenter(content))
+}
+
+// tappableImage is a custom widget that wraps a canvas object and makes it tappable.
+type tappableImage struct {
+	widget.BaseWidget
+	content  fyne.CanvasObject
+	onTapped func()
+}
+
+func newTappableImage(content fyne.CanvasObject, onTapped func()) *tappableImage {
+	t := &tappableImage{content: content, onTapped: onTapped}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappableImage) Tapped(_ *fyne.PointEvent) {
+	if t.onTapped != nil {
+		t.onTapped()
+	}
+}
+
+func (t *tappableImage) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.content)
+}
+
+func (t *tappableImage) MinSize() fyne.Size {
+	return t.content.MinSize()
 }

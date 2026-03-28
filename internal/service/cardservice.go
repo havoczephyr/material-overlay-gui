@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/havoczephyr/material-overlay-gui/internal/api"
@@ -159,6 +160,26 @@ func (s *CardService) FetchErrata(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
+// FetchTipsRaw fetches raw wiki text for tips (with [[links]] preserved for RichText).
+func (s *CardService) FetchTipsRaw(cardName string) (string, error) {
+	return s.wikiClient.FetchCardTips(cardName)
+}
+
+// FetchTriviaRaw fetches raw wiki text for trivia.
+func (s *CardService) FetchTriviaRaw(cardName string) (string, error) {
+	return s.wikiClient.FetchCardTrivia(cardName)
+}
+
+// FetchRulingsRaw fetches raw wiki text for rulings.
+func (s *CardService) FetchRulingsRaw(cardName string) (string, error) {
+	return s.wikiClient.FetchCardRulings(cardName)
+}
+
+// FetchErrataRaw fetches raw wiki text for errata.
+func (s *CardService) FetchErrataRaw(cardName string) (string, error) {
+	return s.wikiClient.FetchCardErrata(cardName)
+}
+
 // FetchGalleryEntries fetches gallery image entries for a card.
 func (s *CardService) FetchGalleryEntries(cardName string) ([]api.GalleryEntry, error) {
 	filenames, err := s.wikiClient.FetchGalleryImageNames(cardName)
@@ -199,6 +220,63 @@ func (s *CardService) FetchGalleryImage(entry api.GalleryEntry) ([]byte, error) 
 // LoadGenesysPoints loads Genesys point data (from disk cache or wiki).
 func (s *CardService) LoadGenesysPoints() error {
 	return s.genesys.Load()
+}
+
+// FetchRecentSets returns the most recent card sets, sorted by TCG date descending.
+func (s *CardService) FetchRecentSets(limit int) ([]api.YGOProSet, error) {
+	// Check cache
+	if cached, ok := s.cache.Get("sets:all"); ok {
+		if sets, ok := cached.([]api.YGOProSet); ok {
+			return truncateSets(sets, limit), nil
+		}
+	}
+
+	sets, err := s.ygoproClient.FetchAllSets()
+	if err != nil {
+		return nil, err
+	}
+
+	// Sort by TCG date descending
+	sortSetsByDate(sets)
+
+	// Cache for 24h
+	s.cache.Set("sets:all", sets, cache.SetTTL)
+
+	return truncateSets(sets, limit), nil
+}
+
+// FetchCardsInSet returns all cards in a specific set.
+func (s *CardService) FetchCardsInSet(setName string) ([]api.YGOProCard, error) {
+	return s.ygoproClient.FetchCardsBySet(setName)
+}
+
+// CategorizeRecentSets splits sets into packs and structure decks.
+func CategorizeRecentSets(sets []api.YGOProSet) (packs, structures []api.YGOProSet) {
+	for _, s := range sets {
+		name := strings.ToLower(s.SetName)
+		if strings.Contains(name, "structure deck") || strings.Contains(name, "starter deck") {
+			structures = append(structures, s)
+		} else {
+			packs = append(packs, s)
+		}
+	}
+	return
+}
+
+func sortSetsByDate(sets []api.YGOProSet) {
+	// Sort by TCGDate descending (format: "2024-01-15")
+	for i := 1; i < len(sets); i++ {
+		for j := i; j > 0 && sets[j].TCGDate > sets[j-1].TCGDate; j-- {
+			sets[j], sets[j-1] = sets[j-1], sets[j]
+		}
+	}
+}
+
+func truncateSets(sets []api.YGOProSet, limit int) []api.YGOProSet {
+	if len(sets) <= limit {
+		return sets
+	}
+	return sets[:limit]
 }
 
 func (s *CardService) fetchImageForCard(cd *card.Card) []byte {
