@@ -80,9 +80,13 @@ func (s *CardService) LookupCard(name string) (*card.Card, []byte, error) {
 		}
 	}
 
-	// Fetch card sets from YGOPRODECK
+	// Fetch card data from YGOPRODECK
 	ygoproCard, err := s.ygoproClient.FetchCardByName(cd.Name)
 	if err == nil && ygoproCard != nil {
+		// Use YGOPRODECK's plain text description instead of Yugipedia wikitext lore
+		if ygoproCard.Desc != "" {
+			cd.Lore = ygoproCard.Desc
+		}
 		for _, cs := range ygoproCard.CardSets {
 			cd.CardSets = append(cd.CardSets, card.CardSetEntry{
 				SetName: cs.SetName,
@@ -124,7 +128,7 @@ func (s *CardService) LoadRandomCard() (*api.YGOProCard, []byte, error) {
 	return ygoproCard, imgData, nil
 }
 
-// FetchTips fetches card tips from Yugipedia.
+// FetchTips fetches card tips and returns clean plain text.
 func (s *CardService) FetchTips(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardTips(cardName)
 	if err != nil {
@@ -133,7 +137,7 @@ func (s *CardService) FetchTips(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchTrivia fetches card trivia from Yugipedia.
+// FetchTrivia fetches card trivia and returns clean plain text.
 func (s *CardService) FetchTrivia(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardTrivia(cardName)
 	if err != nil {
@@ -142,7 +146,7 @@ func (s *CardService) FetchTrivia(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchRulings fetches card rulings from Yugipedia.
+// FetchRulings fetches card rulings and returns clean plain text.
 func (s *CardService) FetchRulings(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardRulings(cardName)
 	if err != nil {
@@ -151,33 +155,13 @@ func (s *CardService) FetchRulings(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchErrata fetches card errata from Yugipedia.
+// FetchErrata fetches card errata and returns clean plain text.
 func (s *CardService) FetchErrata(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardErrata(cardName)
 	if err != nil {
 		return "", err
 	}
 	return card.StripWikiPageContent(raw), nil
-}
-
-// FetchTipsRaw fetches raw wiki text for tips (with [[links]] preserved for RichText).
-func (s *CardService) FetchTipsRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardTips(cardName)
-}
-
-// FetchTriviaRaw fetches raw wiki text for trivia.
-func (s *CardService) FetchTriviaRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardTrivia(cardName)
-}
-
-// FetchRulingsRaw fetches raw wiki text for rulings.
-func (s *CardService) FetchRulingsRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardRulings(cardName)
-}
-
-// FetchErrataRaw fetches raw wiki text for errata.
-func (s *CardService) FetchErrataRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardErrata(cardName)
 }
 
 // FetchGalleryEntries fetches gallery image entries for a card.
@@ -250,7 +234,7 @@ func (s *CardService) FetchCardsInSet(setName string) ([]api.YGOProCard, error) 
 	return s.ygoproClient.FetchCardsBySet(setName)
 }
 
-// FetchArchetypeArticle fetches the wiki article for an archetype.
+// FetchArchetypeArticle fetches the wiki article for an archetype as clean plain text.
 // Tries the plain name first, then falls back to "Name (archetype)".
 func (s *CardService) FetchArchetypeArticle(name string) (string, error) {
 	raw, err := s.wikiClient.FetchWikiPage(name)
@@ -258,9 +242,13 @@ func (s *CardService) FetchArchetypeArticle(name string) (string, error) {
 		return "", err
 	}
 	if raw != "" {
-		return raw, nil
+		return card.StripWikiPageContent(raw), nil
 	}
-	return s.wikiClient.FetchWikiPage(name + " (archetype)")
+	raw, err = s.wikiClient.FetchWikiPage(name + " (archetype)")
+	if err != nil {
+		return "", err
+	}
+	return card.StripWikiPageContent(raw), nil
 }
 
 // FetchArchetypeCards fetches all cards belonging to an archetype from YGOPRODECK.

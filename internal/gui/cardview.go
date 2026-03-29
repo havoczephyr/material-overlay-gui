@@ -293,33 +293,35 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 }
 
 func (a *App) loadTabContent(cardName, tabType string, box *fyne.Container) {
-	var rawText string
+	var text string
 	var err error
 
 	switch tabType {
 	case "tips":
-		rawText, err = a.svc.FetchTipsRaw(cardName)
+		text, err = a.svc.FetchTips(cardName)
 	case "trivia":
-		rawText, err = a.svc.FetchTriviaRaw(cardName)
+		text, err = a.svc.FetchTrivia(cardName)
 	case "rulings":
-		rawText, err = a.svc.FetchRulingsRaw(cardName)
+		text, err = a.svc.FetchRulings(cardName)
 	case "errata":
-		rawText, err = a.svc.FetchErrataRaw(cardName)
+		text, err = a.svc.FetchErrata(cardName)
 	}
 
-	// Build the replacement content off the main thread
 	var newContent fyne.CanvasObject
 	if err != nil {
 		newContent = widget.NewLabel("Failed to load: " + err.Error())
-	} else if rawText == "" {
+	} else if text == "" {
 		dimText := canvas.NewText("No "+tabType+" available for this card.", theme.ColorFGDim)
 		dimText.TextSize = 13
 		newContent = dimText
 	} else {
-		newContent = a.wikiArticleToContent(rawText)
+		// Plain label with word wrap — same approach as the TUI.
+		// No RichText, no clickable links — just clean text that wraps properly.
+		label := widget.NewLabel(text)
+		label.Wrapping = fyne.TextWrapWord
+		newContent = label
 	}
 
-	// Swap into the visible container on the main thread
 	fyne.Do(func() {
 		box.Objects = []fyne.CanvasObject{newContent}
 		box.Refresh()

@@ -80,7 +80,9 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		dimText.TextSize = 13
 		articleWidget = dimText
 	} else {
-		articleWidget = a.wikiArticleToContent(article)
+		label := widget.NewLabel(article)
+		label.Wrapping = fyne.TextWrapWord
+		articleWidget = label
 	}
 
 	// Sticky header: image + title fixed at top, article scrolls underneath

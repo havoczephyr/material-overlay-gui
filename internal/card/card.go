@@ -132,8 +132,6 @@ var (
 	reRefBlock = regexp.MustCompile(`(?s)<ref[^>]*>.*?</ref>`)
 	// <ref .../> (self-closing references)
 	reRefSelf = regexp.MustCompile(`<ref[^/]*/\s*>`)
-	// {{template}} (non-nested — run multiple passes for nesting)
-	reTemplate = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 	// == Section Header == -> Section Header
 	reSectionHeader = regexp.MustCompile(`={2,}\s*(.*?)\s*={2,}`)
 	// any remaining HTML tags
@@ -142,8 +140,6 @@ var (
 	reTableStart  = regexp.MustCompile(`(?m)^\{\|.*$`)
 	reTableEnd    = regexp.MustCompile(`(?m)^\|\}.*$`)
 	reTableRowSep = regexp.MustCompile(`(?m)^\|-.*$`)
-	// wiki table cell attributes (e.g., colspan="2" | content)
-	reCellAttr = regexp.MustCompile(`^(?:\s*[\w-]+\s*=\s*"[^"]*"\s*)+\|`)
 )
 
 func StripWikiMarkup(s string) string {
@@ -158,31 +154,22 @@ func StripWikiMarkup(s string) string {
 }
 
 // StripWikiPageContent converts raw wikitext from a wiki page into readable plain text.
-// Handles bullets, templates, references, table markup, links, and formatting.
+// Strips all markup including links — produces clean text for display in labels.
 func StripWikiPageContent(s string) string {
 	if s == "" {
 		return ""
 	}
 
-	// Remove references
 	s = reRefBlock.ReplaceAllString(s, "")
 	s = reRefSelf.ReplaceAllString(s, "")
-
-	// Remove templates (depth-tracking for arbitrary nesting)
 	s = stripTemplates(s)
 
-	// Remove table markup
 	s = reTableStart.ReplaceAllString(s, "")
 	s = reTableEnd.ReplaceAllString(s, "")
 	s = reTableRowSep.ReplaceAllString(s, "")
 
-	// Strip section headers
 	s = reSectionHeader.ReplaceAllString(s, "$1")
-
-	// Strip bold before italic (''' before '')
 	s = reBold.ReplaceAllString(s, "$1")
-
-	// Apply standard wiki markup stripping
 	s = rePipeLink.ReplaceAllString(s, "$1")
 	s = reLink.ReplaceAllString(s, "$1")
 	s = reItalic.ReplaceAllString(s, "$1")
@@ -190,7 +177,6 @@ func StripWikiPageContent(s string) string {
 	s = reHTML.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
 
-	// Process lines: convert bullets, strip table cell prefixes, drop empties
 	var result []string
 	for _, line := range strings.Split(s, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -198,7 +184,6 @@ func StripWikiPageContent(s string) string {
 			continue
 		}
 
-		// Wiki bullet points (* or **) -> bullet character
 		if strings.HasPrefix(trimmed, "*") {
 			depth := 0
 			for _, ch := range trimmed {
@@ -215,7 +200,6 @@ func StripWikiPageContent(s string) string {
 			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
 		}
 
-		// Table header cells (! or !!)
 		if strings.HasPrefix(trimmed, "!") {
 			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
 			if trimmed == "" {
@@ -223,7 +207,6 @@ func StripWikiPageContent(s string) string {
 			}
 		}
 
-		// Table data cells (| prefix)
 		if strings.HasPrefix(trimmed, "|") {
 			trimmed = strings.TrimSpace(trimmed[1:])
 			if trimmed == "" {
@@ -235,6 +218,33 @@ func StripWikiPageContent(s string) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// stripTemplates removes all {{...}} template blocks, handling arbitrary nesting.
+func stripTemplates(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+			depth := 1
+			i += 2
+			for i < len(s) && depth > 0 {
+				if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+					depth++
+					i += 2
+				} else if i+1 < len(s) && s[i] == '}' && s[i+1] == '}' {
+					depth--
+					i += 2
+				} else {
+					i++
+				}
+			}
+		} else {
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
 }
 
 // WikiLink represents a card reference found in wiki text.
@@ -243,73 +253,6 @@ type WikiLink struct {
 	End     int    // byte offset end in the plain text output
 	Target  string // card name to navigate to (the link target)
 	Display string // display text shown to the user
-}
-
-// CleanWikiTextPreserveLinks applies the same cleanup as StripWikiPageContent
-// but keeps [[...]] link markup intact for later parsing.
-func CleanWikiTextPreserveLinks(s string) string {
-	if s == "" {
-		return ""
-	}
-
-	s = reRefBlock.ReplaceAllString(s, "")
-	s = reRefSelf.ReplaceAllString(s, "")
-
-	s = stripTemplates(s)
-
-	s = reTableStart.ReplaceAllString(s, "")
-	s = reTableEnd.ReplaceAllString(s, "")
-	s = reTableRowSep.ReplaceAllString(s, "")
-
-	s = reSectionHeader.ReplaceAllString(s, "$1")
-	s = reBold.ReplaceAllString(s, "$1")
-	s = reItalic.ReplaceAllString(s, "$1")
-	s = reBR.ReplaceAllString(s, "\n")
-	s = reHTML.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
-
-	// Process lines but preserve [[...]] links
-	var result []string
-	for _, line := range strings.Split(s, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "*") {
-			depth := 0
-			for _, ch := range trimmed {
-				if ch == '*' {
-					depth++
-				} else {
-					break
-				}
-			}
-			prefix := "• "
-			if depth > 1 {
-				prefix = "  • "
-			}
-			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
-		}
-
-		if strings.HasPrefix(trimmed, "!") {
-			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
-			if trimmed == "" {
-				continue
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "|") {
-			trimmed = strings.TrimSpace(trimmed[1:])
-			if trimmed == "" {
-				continue
-			}
-		}
-
-		result = append(result, trimmed)
-	}
-
-	return strings.Join(result, "\n")
 }
 
 // ParseWikiLinks extracts [[...]] links from cleaned wiki text.
@@ -380,34 +323,7 @@ func ParseWikiLinks(cleaned string) (string, []WikiLink) {
 	return out.String(), links
 }
 
-// stripTemplates removes all {{...}} template blocks, properly handling nesting.
-func stripTemplates(s string) string {
-	var out strings.Builder
-	i := 0
-	for i < len(s) {
-		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
-			depth := 1
-			i += 2
-			for i < len(s) && depth > 0 {
-				if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
-					depth++
-					i += 2
-				} else if i+1 < len(s) && s[i] == '}' && s[i+1] == '}' {
-					depth--
-					i += 2
-				} else {
-					i++
-				}
-			}
-		} else {
-			out.WriteByte(s[i])
-			i++
-		}
-	}
-	return out.String()
-}
-
-// ── Article parsing (tables + text segments) ────────────────────────────
+// ── Shared types for article parsing ────────────────────────────────────
 
 // WikiTable represents a parsed wiki table.
 type WikiTable struct {
@@ -426,210 +342,3 @@ type ArticleSegment struct {
 	Table *WikiTable // non-nil for table segments
 }
 
-// ParseArticle extracts structured content from raw wiki article text.
-// Returns interleaved text and table segments.
-func ParseArticle(raw string) []ArticleSegment {
-	if raw == "" {
-		return nil
-	}
-
-	s := reRefBlock.ReplaceAllString(raw, "")
-	s = reRefSelf.ReplaceAllString(s, "")
-	s = stripTemplates(s)
-
-	return extractArticleSegments(s)
-}
-
-func extractArticleSegments(s string) []ArticleSegment {
-	var segments []ArticleSegment
-
-	for {
-		start := strings.Index(s, "{|")
-		if start == -1 {
-			cleaned := cleanArticleText(s)
-			if cleaned != "" {
-				segments = append(segments, ArticleSegment{Text: cleaned})
-			}
-			break
-		}
-
-		before := s[:start]
-		cleaned := cleanArticleText(before)
-		if cleaned != "" {
-			segments = append(segments, ArticleSegment{Text: cleaned})
-		}
-
-		inner := s[start+2:]
-		end := findTableEnd(inner)
-		if end == -1 {
-			cleaned = cleanArticleText(s[start:])
-			if cleaned != "" {
-				segments = append(segments, ArticleSegment{Text: cleaned})
-			}
-			break
-		}
-
-		tableContent := inner[:end]
-		table := parseWikiTable(tableContent)
-		if len(table.Rows) > 0 {
-			segments = append(segments, ArticleSegment{Table: &table})
-		}
-
-		s = inner[end+2:]
-	}
-
-	return segments
-}
-
-// findTableEnd finds the matching |} for a {| table start.
-// s should be the content after the opening {|.
-func findTableEnd(s string) int {
-	depth := 1
-	i := 0
-	for i < len(s) {
-		if i+1 < len(s) {
-			if s[i] == '{' && s[i+1] == '|' {
-				depth++
-				i += 2
-				continue
-			}
-			if s[i] == '|' && s[i+1] == '}' {
-				depth--
-				if depth == 0 {
-					return i
-				}
-				i += 2
-				continue
-			}
-		}
-		i++
-	}
-	return -1
-}
-
-// cleanArticleText cleans wiki text for display, preserving [[links]].
-func cleanArticleText(s string) string {
-	s = reTableStart.ReplaceAllString(s, "")
-	s = reTableEnd.ReplaceAllString(s, "")
-	s = reTableRowSep.ReplaceAllString(s, "")
-	s = reSectionHeader.ReplaceAllString(s, "$1")
-	s = reBold.ReplaceAllString(s, "$1")
-	s = reItalic.ReplaceAllString(s, "$1")
-	s = reBR.ReplaceAllString(s, "\n")
-	s = reHTML.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
-
-	var result []string
-	for _, line := range strings.Split(s, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "*") {
-			depth := 0
-			for _, ch := range trimmed {
-				if ch == '*' {
-					depth++
-				} else {
-					break
-				}
-			}
-			prefix := "• "
-			if depth > 1 {
-				prefix = "  • "
-			}
-			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
-		}
-
-		// Strip leftover table header/data cell prefixes
-		if strings.HasPrefix(trimmed, "!") {
-			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
-			if trimmed == "" {
-				continue
-			}
-		}
-		if strings.HasPrefix(trimmed, "|") {
-			trimmed = strings.TrimSpace(trimmed[1:])
-			if trimmed == "" {
-				continue
-			}
-		}
-
-		result = append(result, trimmed)
-	}
-	return strings.Join(result, "\n")
-}
-
-func parseWikiTable(content string) WikiTable {
-	var table WikiTable
-	lines := strings.Split(content, "\n")
-	var currentRow WikiTableRow
-	inRow := false
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "|-") {
-			if inRow && len(currentRow.Cells) > 0 {
-				table.Rows = append(table.Rows, currentRow)
-			}
-			currentRow = WikiTableRow{}
-			inRow = true
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "!") {
-			if !inRow {
-				inRow = true
-			}
-			currentRow.IsHeader = true
-			cellContent := strings.TrimSpace(trimmed[1:])
-			cells := strings.Split(cellContent, "!!")
-			for _, cell := range cells {
-				cell = strings.TrimSpace(cell)
-				cell = stripCellAttrs(cell)
-				cell = StripWikiMarkup(cell)
-				cell = strings.TrimSpace(cell)
-				if cell != "" {
-					currentRow.Cells = append(currentRow.Cells, cell)
-				}
-			}
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "|") {
-			if !inRow {
-				inRow = true
-			}
-			cellContent := strings.TrimSpace(trimmed[1:])
-			cells := strings.Split(cellContent, "||")
-			for _, cell := range cells {
-				cell = strings.TrimSpace(cell)
-				cell = stripCellAttrs(cell)
-				cell = StripWikiMarkup(cell)
-				cell = strings.TrimSpace(cell)
-				if cell != "" {
-					currentRow.Cells = append(currentRow.Cells, cell)
-				}
-			}
-			continue
-		}
-	}
-
-	if inRow && len(currentRow.Cells) > 0 {
-		table.Rows = append(table.Rows, currentRow)
-	}
-
-	return table
-}
-
-func stripCellAttrs(cell string) string {
-	loc := reCellAttr.FindStringIndex(cell)
-	if loc != nil {
-		return strings.TrimSpace(cell[loc[1]:])
-	}
-	return cell
-}

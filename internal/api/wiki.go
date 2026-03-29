@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ParseResponse is the top-level response from action=parse.
+// ParseResponse is the top-level response from action=parse with prop=wikitext.
 type ParseResponse struct {
 	Parse ParseResult `json:"parse"`
 }
