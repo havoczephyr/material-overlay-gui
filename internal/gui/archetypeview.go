@@ -114,14 +114,23 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 	cardSection := container.NewVBox(cardHeader, cardListBox)
 	cardScroll := container.NewVScroll(container.NewPadded(cardSection))
 
-	// ── Animated divider with toggle ──
+	// ── Two-layer Stack (same pattern as card view gallery animation) ──
+	// Fyne doesn't clip children, so when GridWrap shrinks to 0 the article
+	// content overflows. Fix: article sits on a bottom layer at fixed height,
+	// and the cards layer has an animated spacer + opaque bg that slides over it.
+
 	splitHeight := float32(300)
 	expandedHeight := float32(650)
 	collapsedHeight := float32(0)
 	currentHeight := splitHeight
 	state := 0 // 0=split, 1=article expanded, 2=cards expanded
 
-	articleWrapper := container.NewGridWrap(fyne.NewSize(960, splitHeight), articleSection)
+	// Bottom layer: article section always at full height, never animated
+	articleFixedWrapper := container.NewGridWrap(fyne.NewSize(960, expandedHeight), articleSection)
+	articleLayer := container.NewBorder(articleFixedWrapper, nil, nil, nil)
+
+	// Top layer spacer: animated, pushes cards section down
+	topSpacer := container.NewGridWrap(fyne.NewSize(960, splitHeight), layout.NewSpacer())
 
 	var currentAnim *fyne.Animation
 	animateTo := func(target float32) {
@@ -134,8 +143,8 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 			fyne.NewSize(960, target),
 			time.Millisecond*300,
 			func(s fyne.Size) {
-				articleWrapper.Layout = layout.NewGridWrapLayout(s)
-				articleWrapper.Refresh()
+				topSpacer.Layout = layout.NewGridWrapLayout(s)
+				topSpacer.Refresh()
 				a.contentBox.Refresh()
 			},
 		)
@@ -175,11 +184,13 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		container.NewCenter(container.NewHBox(downBtn, upBtn)),
 	)
 
-	// ── Assemble: article (top, animated) + toggle + cards (center) ──
-	// Opaque background on bottom section prevents article overflow bleeding through
-	bottomBg := canvas.NewRectangle(theme.ColorBG)
-	bottomSection := container.NewStack(bottomBg, container.NewBorder(toggleBar, nil, nil, nil, cardScroll))
-	fullView := container.NewBorder(articleWrapper, nil, nil, nil, bottomSection)
+	// Top layer: opaque bg covers article beneath as cards slide up
+	cardsBg := canvas.NewRectangle(theme.ColorBG)
+	cardsWithBg := container.NewStack(cardsBg, container.NewBorder(toggleBar, nil, nil, nil, cardScroll))
+	cardsLayer := container.NewBorder(topSpacer, nil, nil, nil, cardsWithBg)
+
+	// Stack: article on bottom, cards slide over it on top
+	fullView := container.NewStack(articleLayer, cardsLayer)
 
 	a.setContent(fullView)
 }
