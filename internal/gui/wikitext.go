@@ -118,7 +118,7 @@ func renderWikiTable(table *card.WikiTable) fyne.CanvasObject {
 			if row.IsHeader {
 				label.TextStyle = fyne.TextStyle{Bold: true}
 			}
-			grid.Add(container.NewPadded(label))
+			grid.Add(label)
 		}
 	}
 

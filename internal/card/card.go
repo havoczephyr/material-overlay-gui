@@ -540,6 +540,21 @@ func cleanArticleText(s string) string {
 			}
 			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
 		}
+
+		// Strip leftover table header/data cell prefixes
+		if strings.HasPrefix(trimmed, "!") {
+			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
+			if trimmed == "" {
+				continue
+			}
+		}
+		if strings.HasPrefix(trimmed, "|") {
+			trimmed = strings.TrimSpace(trimmed[1:])
+			if trimmed == "" {
+				continue
+			}
+		}
+
 		result = append(result, trimmed)
 	}
 	return strings.Join(result, "\n")

@@ -59,17 +59,17 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 	if imgData != nil {
 		img := canvas.NewImageFromReader(bytes.NewReader(imgData), name)
 		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(200, 293))
+		img.SetMinSize(fyne.NewSize(170, 250))
 		imgWidget = img
 	} else {
 		rect := canvas.NewRectangle(theme.ColorBGLight)
-		rect.SetMinSize(fyne.NewSize(200, 293))
+		rect.SetMinSize(fyne.NewSize(170, 250))
 		rect.CornerRadius = 8
 		imgWidget = rect
 	}
 
 	nameText := canvas.NewText(name, theme.ColorPrimary)
-	nameText.TextSize = 22
+	nameText.TextSize = 18
 	nameText.TextStyle.Bold = true
 
 	var articleWidget fyne.CanvasObject
@@ -89,7 +89,7 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		container.NewCenter(nameText),
 	)
 	articleSection := container.NewBorder(
-		container.NewPadded(header), nil, nil, nil,
+		header, nil, nil, nil,
 		container.NewVScroll(container.NewPadded(articleWidget)),
 	)
 
@@ -174,7 +174,9 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 	)
 
 	// ── Assemble: article (top, animated) + toggle + cards (center) ──
-	bottomSection := container.NewBorder(toggleBar, nil, nil, nil, cardScroll)
+	// Opaque background on bottom section prevents article overflow bleeding through
+	bottomBg := canvas.NewRectangle(theme.ColorBG)
+	bottomSection := container.NewStack(bottomBg, container.NewBorder(toggleBar, nil, nil, nil, cardScroll))
 	fullView := container.NewBorder(articleWrapper, nil, nil, nil, bottomSection)
 
 	a.setContent(fullView)

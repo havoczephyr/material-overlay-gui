@@ -77,7 +77,7 @@ func coloredValue(label string, value string, valueColor color.Color) fyne.Canva
 // sectionHeader creates a styled section header.
 func sectionHeader(text string) fyne.CanvasObject {
 	t := canvas.NewText(text, theme.ColorPrimary)
-	t.TextSize = 16
+	t.TextSize = 14
 	t.TextStyle.Bold = true
 	return t
 }
