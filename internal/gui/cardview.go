@@ -16,7 +16,6 @@ import (
 )
 
 func (a *App) showCardByName(name string) {
-	// Show loading state
 	loading := container.NewCenter(widget.NewLabel("Loading " + name + "..."))
 	a.setContent(loading)
 
@@ -120,17 +119,23 @@ func (a *App) renderCardView(cd *card.Card, imgData []byte) {
 	topSplit := container.NewHSplit(topLeft, topRight)
 	topSplit.SetOffset(0.35)
 
-	// Wrap top section in a sized container for gallery animation
+	// Card art stays in its fixed 400px box, top-aligned — never animated
 	topWrapper := container.NewGridWrap(fyne.NewSize(960, 400), topSplit)
+	cardLayer := container.NewBorder(topWrapper, nil, nil, nil)
 
-	// ── Bottom: Tabbed content ──
-	tabs := a.buildCardTabs(cd, topWrapper)
+	// Invisible spacer pushes tabs down; animated from 400→0 for gallery
+	topSpacer := container.NewGridWrap(fyne.NewSize(960, 400), layout.NewSpacer())
 
-	// Full layout
-	fullView := container.NewBorder(
-		container.NewPadded(topWrapper), nil, nil, nil,
-		container.NewPadded(tabs),
-	)
+	// ── Tabbed content ──
+	tabs := a.buildCardTabs(cd, topSpacer)
+
+	// Tabs layer: opaque background so it covers card art beneath
+	tabsBg := canvas.NewRectangle(theme.ColorBG)
+	tabsWithBg := container.NewStack(tabsBg, container.NewPadded(tabs))
+	tabsLayer := container.NewBorder(topSpacer, nil, nil, nil, tabsWithBg)
+
+	// Stack: card art on bottom layer, tabs slide over it on top layer
+	fullView := container.NewStack(cardLayer, tabsLayer)
 
 	a.setContent(fullView)
 }
@@ -145,13 +150,13 @@ func (a *App) buildCardTabs(cd *card.Card, topWrapper *fyne.Container) *containe
 	rulingsContent := container.NewVBox(widget.NewLabel("Loading rulings..."))
 	errataContent := container.NewVBox(widget.NewLabel("Loading errata..."))
 
-	galleryContent := container.NewVBox(widget.NewLabel("Loading gallery..."))
+	galleryContent := container.NewStack(widget.NewLabel("Loading gallery..."))
 
 	tabs := container.NewAppTabs(
 		container.NewTabItem("Card Text", container.NewVScroll(container.NewPadded(cardTextContent))),
 		container.NewTabItem("Tips", container.NewVScroll(container.NewPadded(tipsContent))),
 		container.NewTabItem("Trivia", container.NewVScroll(container.NewPadded(triviaContent))),
-		container.NewTabItem("Gallery", container.NewVScroll(container.NewPadded(galleryContent))),
+		container.NewTabItem("Gallery", container.NewPadded(galleryContent)),
 		container.NewTabItem("Rulings", container.NewVScroll(container.NewPadded(rulingsContent))),
 		container.NewTabItem("Errata", container.NewVScroll(container.NewPadded(errataContent))),
 	)
@@ -159,7 +164,7 @@ func (a *App) buildCardTabs(cd *card.Card, topWrapper *fyne.Container) *containe
 
 	// Gallery animation state
 	fullHeight := float32(400)
-	collapsedHeight := float32(160)
+	collapsedHeight := float32(0)
 	wasGallery := false
 	var currentAnim *fyne.Animation
 
@@ -181,6 +186,7 @@ func (a *App) buildCardTabs(cd *card.Card, topWrapper *fyne.Container) *containe
 				func(s fyne.Size) {
 					topWrapper.Layout = layout.NewGridWrapLayout(s)
 					topWrapper.Refresh()
+					a.contentBox.Refresh()
 				},
 			)
 			currentAnim.Curve = fyne.AnimationEaseInOut
@@ -197,6 +203,7 @@ func (a *App) buildCardTabs(cd *card.Card, topWrapper *fyne.Container) *containe
 				func(s fyne.Size) {
 					topWrapper.Layout = layout.NewGridWrapLayout(s)
 					topWrapper.Refresh()
+					a.contentBox.Refresh()
 				},
 			)
 			currentAnim.Curve = fyne.AnimationEaseInOut
@@ -289,16 +296,21 @@ func (a *App) loadTabContent(cardName, tabType string, box *fyne.Container) {
 		rawText, err = a.svc.FetchErrataRaw(cardName)
 	}
 
-	box.Objects = nil
+	// Build the replacement content off the main thread
+	var newContent fyne.CanvasObject
 	if err != nil {
-		box.Add(widget.NewLabel("Failed to load: " + err.Error()))
+		newContent = widget.NewLabel("Failed to load: " + err.Error())
 	} else if rawText == "" {
 		dimText := canvas.NewText("No "+tabType+" available for this card.", theme.ColorFGDim)
 		dimText.TextSize = 13
-		box.Add(dimText)
+		newContent = dimText
 	} else {
-		rt := a.wikiTextToRichText(rawText)
-		box.Add(rt)
+		newContent = a.wikiTextToRichText(rawText)
 	}
-	box.Refresh()
+
+	// Swap into the visible container on the main thread
+	fyne.Do(func() {
+		box.Objects = []fyne.CanvasObject{newContent}
+		box.Refresh()
+	})
 }

@@ -37,34 +37,43 @@ func (a *App) showPackDetail(set api.YGOProSet) {
 	go func() {
 		cards, err := a.svc.FetchCardsInSet(set.SetName)
 		if err != nil {
-			cardListBox.Objects = nil
-			cardListBox.Add(widget.NewLabel("Failed to load cards: " + err.Error()))
-			cardListBox.Refresh()
+			fyne.Do(func() {
+				cardListBox.Objects = []fyne.CanvasObject{
+					widget.NewLabel("Failed to load cards: " + err.Error()),
+				}
+				cardListBox.Refresh()
+			})
 			return
 		}
 
 		if len(cards) == 0 {
-			cardListBox.Objects = nil
-			dimText := canvas.NewText("No cards found in this set.", theme.ColorFGDim)
-			dimText.TextSize = 13
-			cardListBox.Add(dimText)
-			cardListBox.Refresh()
+			fyne.Do(func() {
+				dimText := canvas.NewText("No cards found in this set.", theme.ColorFGDim)
+				dimText.TextSize = 13
+				cardListBox.Objects = []fyne.CanvasObject{dimText}
+				cardListBox.Refresh()
+			})
 			return
 		}
 
-		cardListBox.Objects = nil
-		for _, c := range cards {
-			card := c
-			cardListBox.Add(a.packCardRow(card, set.SetName))
+		// Build rows off main thread
+		rows := make([]fyne.CanvasObject, len(cards))
+		for i, c := range cards {
+			rows[i] = a.packCardRow(c, set.SetName)
 		}
-		cardListBox.Refresh()
+
+		fyne.Do(func() {
+			cardListBox.Objects = rows
+			cardListBox.Refresh()
+		})
 	}()
 }
 
 func (a *App) packCardRow(card api.YGOProCard, setName string) fyne.CanvasObject {
 	// Card name (clickable)
-	nameBtn := widget.NewButton(card.Name, func() {
-		a.showCardByName(card.Name)
+	cardName := card.Name
+	nameBtn := widget.NewButton(cardName, func() {
+		a.showCardByName(cardName)
 	})
 	nameBtn.Importance = widget.LowImportance
 	nameBtn.Alignment = widget.ButtonAlignLeading
