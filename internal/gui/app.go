@@ -90,8 +90,10 @@ func (a *App) buildToolbar() fyne.CanvasObject {
 }
 
 func (a *App) setContent(content fyne.CanvasObject) {
-	a.contentBox.Objects = []fyne.CanvasObject{content}
-	a.contentBox.Refresh()
+	fyne.Do(func() {
+		a.contentBox.Objects = []fyne.CanvasObject{content}
+		a.contentBox.Refresh()
+	})
 }
 
 func (a *App) addRecentCard(name string) {

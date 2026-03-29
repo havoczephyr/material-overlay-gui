@@ -15,26 +15,28 @@ import (
 
 // galleryState tracks the state of the thumbnail gallery.
 type galleryState struct {
-	entries      []api.GalleryEntry
-	thumbData    [][]byte // cached image data per entry
-	thumbFrames  []*fyne.Container
-	idx          int
-	mainImg      *fyne.Container
-	infoLabel    *canvas.Text
-	artLabel     *canvas.Text
-	thumbStrip   *fyne.Container
-	prevBtn      *widget.Button
-	nextBtn      *widget.Button
+	entries    []api.GalleryEntry
+	thumbData  [][]byte // cached image data per entry
+	thumbFrames []*fyne.Container
+	idx        int
+	mainImg    *fyne.Container
+	infoLabel  *canvas.Text
+	artLabel   *canvas.Text
+	thumbStrip *fyne.Container
+	prevBtn    *widget.Button
+	nextBtn    *widget.Button
 }
 
 func (a *App) loadGallery(cardName string, box *fyne.Container) {
 	entries, err := a.svc.FetchGalleryEntries(cardName)
 	if err != nil || len(entries) == 0 {
-		box.Objects = nil
-		dimText := canvas.NewText("No gallery images available.", theme.ColorFGDim)
-		dimText.TextSize = 13
-		box.Add(dimText)
-		box.Refresh()
+		fyne.Do(func() {
+			box.Objects = nil
+			dimText := canvas.NewText("No gallery images available.", theme.ColorFGDim)
+			dimText.TextSize = 13
+			box.Add(dimText)
+			box.Refresh()
+		})
 		return
 	}
 
@@ -43,16 +45,15 @@ func (a *App) loadGallery(cardName string, box *fyne.Container) {
 		thumbData: make([][]byte, len(entries)),
 	}
 
-	// Main image display
+	// Build all objects (safe to create off-thread; not yet visible)
 	mainPlaceholder := placeholderImage()
 	gs.mainImg = container.NewCenter(mainPlaceholder)
 
-	// Info labels
-	gs.infoLabel = canvas.NewText("", theme.ColorFGDim)
+	gs.infoLabel = canvas.NewText(fmt.Sprintf("Artwork 1 of %d", len(entries)), theme.ColorFGDim)
 	gs.infoLabel.TextSize = 13
 	gs.infoLabel.Alignment = fyne.TextAlignCenter
 
-	gs.artLabel = canvas.NewText("", theme.ColorFG)
+	gs.artLabel = canvas.NewText(entries[0].Label, theme.ColorFG)
 	gs.artLabel.TextSize = 14
 	gs.artLabel.Alignment = fyne.TextAlignCenter
 
@@ -82,29 +83,32 @@ func (a *App) loadGallery(cardName string, box *fyne.Container) {
 			gs.selectImage(gs.idx-1, a)
 		}
 	})
+	gs.prevBtn.Disable()
+
 	gs.nextBtn = widget.NewButton("Next >", func() {
 		if gs.idx < len(gs.entries)-1 {
 			gs.selectImage(gs.idx+1, a)
 		}
 	})
+	if len(entries) <= 1 {
+		gs.nextBtn.Disable()
+	}
 
 	navRow := container.NewBorder(nil, nil, gs.prevBtn, gs.nextBtn, gs.infoLabel)
 
-	// Assemble gallery layout
-	box.Objects = nil
-	box.Add(gs.mainImg)
-	box.Add(gs.artLabel)
-	box.Add(thumbScroll)
-	box.Add(navRow)
-	box.Refresh()
-
-	// Update labels for first image
-	gs.updateLabels()
+	// Add to visible container on main thread
+	fyne.Do(func() {
+		bottomSection := container.NewVBox(gs.artLabel, thumbScroll, navRow)
+		galleryLayout := container.NewBorder(nil, bottomSection, nil, nil, gs.mainImg)
+		box.Objects = []fyne.CanvasObject{galleryLayout}
+		box.Refresh()
+	})
 
 	// Load thumbnails sequentially in background (respects rate limiting)
 	go gs.loadAllThumbnails(a)
 }
 
+// selectImage is called from tappable callbacks (main thread).
 func (gs *galleryState) selectImage(idx int, a *App) {
 	gs.idx = idx
 	gs.updateLabels()
@@ -114,14 +118,16 @@ func (gs *galleryState) selectImage(idx int, a *App) {
 	if gs.thumbData[idx] != nil {
 		gs.setMainImage(gs.thumbData[idx], gs.entries[idx].Filename)
 	} else {
-		// Not yet loaded - load it now
+		// Not yet loaded - fetch it then update on main thread
 		go func() {
 			data, err := a.svc.FetchGalleryImage(gs.entries[idx])
 			if err != nil {
 				return
 			}
 			gs.thumbData[idx] = data
-			gs.setMainImage(data, gs.entries[idx].Filename)
+			fyne.Do(func() {
+				gs.setMainImage(data, gs.entries[idx].Filename)
+			})
 		}()
 	}
 }
@@ -161,7 +167,7 @@ func (gs *galleryState) updateThumbHighlights() {
 func (gs *galleryState) setMainImage(data []byte, name string) {
 	img := canvas.NewImageFromReader(bytes.NewReader(data), name)
 	img.FillMode = canvas.ImageFillContain
-	img.SetMinSize(fyne.NewSize(300, 440))
+	img.SetMinSize(fyne.NewSize(200, 293))
 	gs.mainImg.Objects = []fyne.CanvasObject{img}
 	gs.mainImg.Refresh()
 }
@@ -176,18 +182,22 @@ func (gs *galleryState) loadAllThumbnails(a *App) {
 		}
 		gs.thumbData[i] = data
 
-		// Update thumbnail frame
-		img := canvas.NewImageFromReader(bytes.NewReader(data), entry.Filename)
-		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(80, 117))
+		idx := i
+		entryFilename := entry.Filename
+		fyne.Do(func() {
+			// Update thumbnail frame
+			img := canvas.NewImageFromReader(bytes.NewReader(data), entryFilename)
+			img.FillMode = canvas.ImageFillContain
+			img.SetMinSize(fyne.NewSize(80, 117))
 
-		frame := gs.thumbFrames[i]
-		frame.Objects = []fyne.CanvasObject{thumbnailFrame(img, i == gs.idx)}
-		frame.Refresh()
+			frame := gs.thumbFrames[idx]
+			frame.Objects = []fyne.CanvasObject{thumbnailFrame(img, idx == gs.idx)}
+			frame.Refresh()
 
-		// Set main image for the first entry
-		if i == 0 && gs.idx == 0 {
-			gs.setMainImage(data, entry.Filename)
-		}
+			// Set main image for the first entry
+			if idx == 0 && gs.idx == 0 {
+				gs.setMainImage(data, entryFilename)
+			}
+		})
 	}
 }

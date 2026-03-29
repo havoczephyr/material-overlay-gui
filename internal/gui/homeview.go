@@ -46,117 +46,130 @@ func (a *App) showHome() {
 	)
 	topBanner.SetOffset(0.25)
 
-	// ── Middle: Set browser with tabs ──
-	latestList := container.NewVBox(widget.NewLabel("Loading sets..."))
-	packsList := container.NewVBox(widget.NewLabel("Loading packs..."))
-	structsList := container.NewVBox(widget.NewLabel("Loading structure decks..."))
+	// ── Middle: Set category buttons ──
+	latestBtn := widget.NewButton("Latest Sets", func() {
+		a.showSetList("Latest Sets", nil)
+	})
+	latestBtn.Importance = widget.HighImportance
 
-	setTabs := container.NewAppTabs(
-		container.NewTabItem("Latest", container.NewVScroll(container.NewPadded(latestList))),
-		container.NewTabItem("Packs", container.NewVScroll(container.NewPadded(packsList))),
-		container.NewTabItem("Structure Decks", container.NewVScroll(container.NewPadded(structsList))),
+	packsBtn := widget.NewButton("Booster Packs", func() {
+		a.showSetList("Booster Packs", func(sets []api.YGOProSet) []api.YGOProSet {
+			packs, _ := service.CategorizeRecentSets(sets)
+			return packs
+		})
+	})
+	packsBtn.Importance = widget.MediumImportance
+
+	structsBtn := widget.NewButton("Structure Decks", func() {
+		a.showSetList("Structure Decks", func(sets []api.YGOProSet) []api.YGOProSet {
+			_, structs := service.CategorizeRecentSets(sets)
+			return structs
+		})
+	})
+	structsBtn.Importance = widget.MediumImportance
+
+	browseSection := container.NewVBox(
+		sectionHeader("Browse Sets"),
+		container.NewGridWithColumns(3, latestBtn, packsBtn, structsBtn),
 	)
-	setTabs.SetTabLocation(container.TabLocationTop)
 
 	// ── Bottom: Recent cards ──
 	recentHeader := sectionHeader("Recent Cards")
 	recentRow := container.NewHBox()
 	a.buildRecentRow(recentRow)
-
 	recentSection := container.NewVBox(recentHeader, container.NewHScroll(recentRow))
 
 	// ── Assemble ──
-	mainLayout := container.NewBorder(
+	mainLayout := container.NewVBox(
 		container.NewPadded(topBanner),
+		container.NewPadded(browseSection),
 		container.NewPadded(recentSection),
-		nil, nil,
-		container.NewPadded(setTabs),
 	)
 
-	a.setContent(mainLayout)
+	a.setContent(container.NewVScroll(mainLayout))
 
 	// Load random card
 	go a.loadRandomCard(imgContainer, randomCardName, viewBtn)
-
-	// Load sets in background
-	go a.loadSetBrowser(latestList, packsList, structsList)
 }
 
 func (a *App) loadRandomCard(imgContainer *fyne.Container, nameLabel *widget.RichText, viewBtn *widget.Button) {
 	ygoproCard, imgData, err := a.svc.LoadRandomCard()
 	if err != nil {
-		nameLabel.ParseMarkdown("*Failed to load random card*")
+		fyne.Do(func() {
+			nameLabel.ParseMarkdown("*Failed to load random card*")
+		})
 		return
 	}
 
-	nameLabel.ParseMarkdown("**" + ygoproCard.Name + "**")
+	cardName := ygoproCard.Name
 
-	viewBtn.OnTapped = func() {
-		a.showCardByName(ygoproCard.Name)
-	}
-	viewBtn.Show()
+	fyne.Do(func() {
+		nameLabel.ParseMarkdown("**" + cardName + "**")
 
-	if imgData != nil {
-		img := canvas.NewImageFromReader(bytes.NewReader(imgData), ygoproCard.Name)
-		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(180, 264))
-		imgContainer.Objects = []fyne.CanvasObject{img}
-		imgContainer.Refresh()
-	}
+		viewBtn.OnTapped = func() {
+			a.showCardByName(cardName)
+		}
+		viewBtn.Show()
+
+		if imgData != nil {
+			img := canvas.NewImageFromReader(bytes.NewReader(imgData), cardName)
+			img.FillMode = canvas.ImageFillContain
+			img.SetMinSize(fyne.NewSize(180, 264))
+			imgContainer.Objects = []fyne.CanvasObject{img}
+			imgContainer.Refresh()
+		}
+	})
 }
 
-func (a *App) loadSetBrowser(latestBox, packsBox, structsBox *fyne.Container) {
-	sets, err := a.svc.FetchRecentSets(100)
-	if err != nil {
-		latestBox.Objects = nil
-		latestBox.Add(widget.NewLabel("Failed to load sets: " + err.Error()))
-		latestBox.Refresh()
-		return
-	}
+// showSetList displays a full-page scrollable list of sets with optional filtering.
+func (a *App) showSetList(title string, filter func([]api.YGOProSet) []api.YGOProSet) {
+	header := sectionHeader(title)
+	statusLabel := canvas.NewText("Loading sets...", theme.ColorFGDim)
+	statusLabel.TextSize = 13
 
-	packs, structures := service.CategorizeRecentSets(sets)
+	listBox := container.NewVBox()
+	content := container.NewBorder(
+		container.NewPadded(container.NewVBox(header, statusLabel)),
+		nil, nil, nil,
+		container.NewVScroll(container.NewPadded(listBox)),
+	)
 
-	// Populate Latest (all sets, top 30)
-	latestBox.Objects = nil
-	limit := 30
-	if len(sets) < limit {
-		limit = len(sets)
-	}
-	for _, s := range sets[:limit] {
-		set := s
-		latestBox.Add(a.setRow(set))
-	}
-	latestBox.Refresh()
+	a.setContent(content)
 
-	// Populate Packs (top 30)
-	packsBox.Objects = nil
-	limit = 30
-	if len(packs) < limit {
-		limit = len(packs)
-	}
-	for _, s := range packs[:limit] {
-		set := s
-		packsBox.Add(a.setRow(set))
-	}
-	packsBox.Refresh()
-
-	// Populate Structure Decks (top 30)
-	structsBox.Objects = nil
-	if len(structures) == 0 {
-		dimText := canvas.NewText("No structure decks found.", theme.ColorFGDim)
-		dimText.TextSize = 13
-		structsBox.Add(dimText)
-	} else {
-		limit = 30
-		if len(structures) < limit {
-			limit = len(structures)
+	go func() {
+		sets, err := a.svc.FetchRecentSets(100)
+		if err != nil {
+			fyne.Do(func() {
+				statusLabel.Text = "Failed to load sets: " + err.Error()
+				statusLabel.Refresh()
+			})
+			return
 		}
-		for _, s := range structures[:limit] {
-			set := s
-			structsBox.Add(a.setRow(set))
+
+		if filter != nil {
+			sets = filter(sets)
 		}
-	}
-	structsBox.Refresh()
+
+		limit := 50
+		if len(sets) < limit {
+			limit = len(sets)
+		}
+
+		// Build rows off main thread
+		rows := make([]fyne.CanvasObject, limit)
+		for i, s := range sets[:limit] {
+			rows[i] = a.setRow(s)
+		}
+
+		fyne.Do(func() {
+			statusLabel.Text = ""
+			statusLabel.Refresh()
+			for _, row := range rows {
+				listBox.Add(row)
+			}
+			listBox.Refresh()
+		})
+	}()
 }
 
 func (a *App) setRow(set api.YGOProSet) fyne.CanvasObject {

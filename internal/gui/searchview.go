@@ -23,29 +23,40 @@ func (a *App) showSearch(query string) {
 	go func() {
 		results, err := a.svc.SearchCards(query)
 		if err != nil {
-			statusLabel.Text = "Search failed: " + err.Error()
-			statusLabel.Refresh()
+			fyne.Do(func() {
+				statusLabel.Text = "Search failed: " + err.Error()
+				statusLabel.Refresh()
+			})
 			return
 		}
 
 		if len(results) == 0 {
-			statusLabel.Text = "No results found for \"" + query + "\""
-			statusLabel.Refresh()
+			fyne.Do(func() {
+				statusLabel.Text = "No results found for \"" + query + "\""
+				statusLabel.Refresh()
+			})
 			return
 		}
 
-		statusLabel.Text = ""
-		statusLabel.Refresh()
-
-		for _, r := range results {
+		// Build result items off main thread
+		items := make([]fyne.CanvasObject, len(results))
+		for i, r := range results {
 			title := r.Title
 			btn := widget.NewButton(title, func() {
 				a.showCardByName(title)
 			})
 			btn.Importance = widget.MediumImportance
 			btn.Alignment = widget.ButtonAlignLeading
-			resultsList.Add(container.NewGridWrap(fyne.NewSize(500, 40), btn))
+			items[i] = container.NewGridWrap(fyne.NewSize(500, 40), btn)
 		}
-		resultsList.Refresh()
+
+		fyne.Do(func() {
+			statusLabel.Text = ""
+			statusLabel.Refresh()
+			for _, item := range items {
+				resultsList.Add(item)
+			}
+			resultsList.Refresh()
+		})
 	}()
 }
