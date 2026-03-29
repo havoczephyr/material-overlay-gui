@@ -316,7 +316,7 @@ func (a *App) loadTabContent(cardName, tabType string, box *fyne.Container) {
 		dimText.TextSize = 13
 		newContent = dimText
 	} else {
-		newContent = a.wikiTextToRichText(rawText)
+		newContent = a.wikiArticleToContent(rawText)
 	}
 
 	// Swap into the visible container on the main thread

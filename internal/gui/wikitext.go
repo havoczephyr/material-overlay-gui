@@ -113,16 +113,12 @@ func renderWikiTable(table *card.WikiTable) fyne.CanvasObject {
 			if i < len(row.Cells) {
 				cellText = row.Cells[i]
 			}
+			label := widget.NewLabel(cellText)
+			label.Wrapping = fyne.TextWrapWord
 			if row.IsHeader {
-				text := canvas.NewText(cellText, theme.ColorPrimary)
-				text.TextStyle.Bold = true
-				text.TextSize = 13
-				grid.Add(container.NewPadded(text))
-			} else {
-				text := canvas.NewText(cellText, theme.ColorFG)
-				text.TextSize = 13
-				grid.Add(container.NewPadded(text))
+				label.TextStyle = fyne.TextStyle{Bold: true}
 			}
+			grid.Add(container.NewPadded(label))
 		}
 	}
 

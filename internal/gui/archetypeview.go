@@ -83,14 +83,15 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		articleWidget = a.wikiArticleToContent(article)
 	}
 
-	articleBox := container.NewVBox(nameText, articleWidget)
-	articleScroll := container.NewVScroll(container.NewPadded(articleBox))
-
-	topSplit := container.NewHSplit(
-		container.NewCenter(container.NewPadded(imgWidget)),
-		articleScroll,
+	// Sticky header: image + title fixed at top, article scrolls underneath
+	header := container.NewVBox(
+		container.NewCenter(imgWidget),
+		container.NewCenter(nameText),
 	)
-	topSplit.SetOffset(0.25)
+	articleSection := container.NewBorder(
+		container.NewPadded(header), nil, nil, nil,
+		container.NewVScroll(container.NewPadded(articleWidget)),
+	)
 
 	// ── Cards section ──
 	cardHeader := sectionHeader(fmt.Sprintf("Cards in %s", name))
@@ -118,7 +119,7 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 	currentHeight := splitHeight
 	state := 0 // 0=split, 1=article expanded, 2=cards expanded
 
-	articleWrapper := container.NewGridWrap(fyne.NewSize(960, splitHeight), topSplit)
+	articleWrapper := container.NewGridWrap(fyne.NewSize(960, splitHeight), articleSection)
 
 	var currentAnim *fyne.Animation
 	animateTo := func(target float32) {
