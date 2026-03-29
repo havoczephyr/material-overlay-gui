@@ -142,6 +142,8 @@ var (
 	reTableStart  = regexp.MustCompile(`(?m)^\{\|.*$`)
 	reTableEnd    = regexp.MustCompile(`(?m)^\|\}.*$`)
 	reTableRowSep = regexp.MustCompile(`(?m)^\|-.*$`)
+	// wiki table cell attributes (e.g., colspan="2" | content)
+	reCellAttr = regexp.MustCompile(`^(?:\s*[\w-]+\s*=\s*"[^"]*"\s*)+\|`)
 )
 
 func StripWikiMarkup(s string) string {
@@ -166,14 +168,8 @@ func StripWikiPageContent(s string) string {
 	s = reRefBlock.ReplaceAllString(s, "")
 	s = reRefSelf.ReplaceAllString(s, "")
 
-	// Remove templates (multiple passes for nesting)
-	for i := 0; i < 5; i++ {
-		prev := s
-		s = reTemplate.ReplaceAllString(s, "")
-		if s == prev {
-			break
-		}
-	}
+	// Remove templates (depth-tracking for arbitrary nesting)
+	s = stripTemplates(s)
 
 	// Remove table markup
 	s = reTableStart.ReplaceAllString(s, "")
@@ -259,13 +255,7 @@ func CleanWikiTextPreserveLinks(s string) string {
 	s = reRefBlock.ReplaceAllString(s, "")
 	s = reRefSelf.ReplaceAllString(s, "")
 
-	for i := 0; i < 5; i++ {
-		prev := s
-		s = reTemplate.ReplaceAllString(s, "")
-		if s == prev {
-			break
-		}
-	}
+	s = stripTemplates(s)
 
 	s = reTableStart.ReplaceAllString(s, "")
 	s = reTableEnd.ReplaceAllString(s, "")
@@ -388,4 +378,243 @@ func ParseWikiLinks(cleaned string) (string, []WikiLink) {
 	}
 
 	return out.String(), links
+}
+
+// stripTemplates removes all {{...}} template blocks, properly handling nesting.
+func stripTemplates(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+			depth := 1
+			i += 2
+			for i < len(s) && depth > 0 {
+				if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+					depth++
+					i += 2
+				} else if i+1 < len(s) && s[i] == '}' && s[i+1] == '}' {
+					depth--
+					i += 2
+				} else {
+					i++
+				}
+			}
+		} else {
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
+}
+
+// ── Article parsing (tables + text segments) ────────────────────────────
+
+// WikiTable represents a parsed wiki table.
+type WikiTable struct {
+	Rows []WikiTableRow
+}
+
+// WikiTableRow represents a single row in a wiki table.
+type WikiTableRow struct {
+	Cells    []string
+	IsHeader bool
+}
+
+// ArticleSegment represents a part of a wiki article: either text or a table.
+type ArticleSegment struct {
+	Text  string     // non-empty for text segments (with [[links]] preserved)
+	Table *WikiTable // non-nil for table segments
+}
+
+// ParseArticle extracts structured content from raw wiki article text.
+// Returns interleaved text and table segments.
+func ParseArticle(raw string) []ArticleSegment {
+	if raw == "" {
+		return nil
+	}
+
+	s := reRefBlock.ReplaceAllString(raw, "")
+	s = reRefSelf.ReplaceAllString(s, "")
+	s = stripTemplates(s)
+
+	return extractArticleSegments(s)
+}
+
+func extractArticleSegments(s string) []ArticleSegment {
+	var segments []ArticleSegment
+
+	for {
+		start := strings.Index(s, "{|")
+		if start == -1 {
+			cleaned := cleanArticleText(s)
+			if cleaned != "" {
+				segments = append(segments, ArticleSegment{Text: cleaned})
+			}
+			break
+		}
+
+		before := s[:start]
+		cleaned := cleanArticleText(before)
+		if cleaned != "" {
+			segments = append(segments, ArticleSegment{Text: cleaned})
+		}
+
+		inner := s[start+2:]
+		end := findTableEnd(inner)
+		if end == -1 {
+			cleaned = cleanArticleText(s[start:])
+			if cleaned != "" {
+				segments = append(segments, ArticleSegment{Text: cleaned})
+			}
+			break
+		}
+
+		tableContent := inner[:end]
+		table := parseWikiTable(tableContent)
+		if len(table.Rows) > 0 {
+			segments = append(segments, ArticleSegment{Table: &table})
+		}
+
+		s = inner[end+2:]
+	}
+
+	return segments
+}
+
+// findTableEnd finds the matching |} for a {| table start.
+// s should be the content after the opening {|.
+func findTableEnd(s string) int {
+	depth := 1
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) {
+			if s[i] == '{' && s[i+1] == '|' {
+				depth++
+				i += 2
+				continue
+			}
+			if s[i] == '|' && s[i+1] == '}' {
+				depth--
+				if depth == 0 {
+					return i
+				}
+				i += 2
+				continue
+			}
+		}
+		i++
+	}
+	return -1
+}
+
+// cleanArticleText cleans wiki text for display, preserving [[links]].
+func cleanArticleText(s string) string {
+	s = reTableStart.ReplaceAllString(s, "")
+	s = reTableEnd.ReplaceAllString(s, "")
+	s = reTableRowSep.ReplaceAllString(s, "")
+	s = reSectionHeader.ReplaceAllString(s, "$1")
+	s = reBold.ReplaceAllString(s, "$1")
+	s = reItalic.ReplaceAllString(s, "$1")
+	s = reBR.ReplaceAllString(s, "\n")
+	s = reHTML.ReplaceAllString(s, "")
+	s = html.UnescapeString(s)
+
+	var result []string
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "*") {
+			depth := 0
+			for _, ch := range trimmed {
+				if ch == '*' {
+					depth++
+				} else {
+					break
+				}
+			}
+			prefix := "• "
+			if depth > 1 {
+				prefix = "  • "
+			}
+			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
+		}
+		result = append(result, trimmed)
+	}
+	return strings.Join(result, "\n")
+}
+
+func parseWikiTable(content string) WikiTable {
+	var table WikiTable
+	lines := strings.Split(content, "\n")
+	var currentRow WikiTableRow
+	inRow := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "|-") {
+			if inRow && len(currentRow.Cells) > 0 {
+				table.Rows = append(table.Rows, currentRow)
+			}
+			currentRow = WikiTableRow{}
+			inRow = true
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "!") {
+			if !inRow {
+				inRow = true
+			}
+			currentRow.IsHeader = true
+			cellContent := strings.TrimSpace(trimmed[1:])
+			cells := strings.Split(cellContent, "!!")
+			for _, cell := range cells {
+				cell = strings.TrimSpace(cell)
+				cell = stripCellAttrs(cell)
+				cell = StripWikiMarkup(cell)
+				cell = strings.TrimSpace(cell)
+				if cell != "" {
+					currentRow.Cells = append(currentRow.Cells, cell)
+				}
+			}
+			continue
+		}
+
+		if strings.HasPrefix(trimmed, "|") {
+			if !inRow {
+				inRow = true
+			}
+			cellContent := strings.TrimSpace(trimmed[1:])
+			cells := strings.Split(cellContent, "||")
+			for _, cell := range cells {
+				cell = strings.TrimSpace(cell)
+				cell = stripCellAttrs(cell)
+				cell = StripWikiMarkup(cell)
+				cell = strings.TrimSpace(cell)
+				if cell != "" {
+					currentRow.Cells = append(currentRow.Cells, cell)
+				}
+			}
+			continue
+		}
+	}
+
+	if inRow && len(currentRow.Cells) > 0 {
+		table.Rows = append(table.Rows, currentRow)
+	}
+
+	return table
+}
+
+func stripCellAttrs(cell string) string {
+	loc := reCellAttr.FindStringIndex(cell)
+	if loc != nil {
+		return strings.TrimSpace(cell[loc[1]:])
+	}
+	return cell
 }
