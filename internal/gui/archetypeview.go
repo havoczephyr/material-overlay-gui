@@ -105,11 +105,17 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		imgWithFade,
 		container.NewVBox(nameText, subtitleText),
 	)
+	// Header layer: fixed at top-left, transparent background
+	headerLayer := container.NewBorder(header, nil, nil, nil)
 
-	articleScroll := container.NewVScroll(container.NewPadded(articleWidget))
+	// Article scroll covers the full area; a top spacer pushes text below the header initially.
+	// As the user scrolls, text flows upward over the fading header.
+	headerSpacer := container.NewGridWrap(fyne.NewSize(0, 135), layout.NewSpacer())
+	articleContent := container.NewVBox(headerSpacer, container.NewPadded(articleWidget))
+	articleScroll := container.NewVScroll(articleContent)
 
-	// Scroll-based fade: title and thumbnail decrease in opacity as user scrolls down
-	const fadeDistance = float32(150)
+	// Scroll-based fade: title and thumbnail decrease in opacity as text scrolls over them
+	const fadeDistance = float32(135)
 	articleScroll.OnScrolled = func(pos fyne.Position) {
 		ratio := pos.Y / fadeDistance
 		if ratio < 0 {
@@ -133,10 +139,8 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 		subtitleText.Refresh()
 	}
 
-	articleSection := container.NewBorder(
-		header, nil, nil, nil,
-		articleScroll,
-	)
+	// Stack: header on bottom (fixed), article scroll on top (overlaps as it scrolls up)
+	articleSection := container.NewStack(headerLayer, articleScroll)
 
 	// ── Cards section ──
 	cardHeader := sectionHeader(fmt.Sprintf("Cards in %s", name))
