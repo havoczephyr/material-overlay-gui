@@ -186,6 +186,41 @@ func (c *YGOProClient) FetchAllSets() ([]YGOProSet, error) {
 	return sets, nil
 }
 
+// FetchCardsByArchetype returns all cards in a specific archetype from YGOPRODECK.
+func (c *YGOProClient) FetchCardsByArchetype(archetype string) ([]YGOProCard, error) {
+	c.rateLimiter.Wait()
+
+	req, err := http.NewRequest("GET", ygoproBaseURL+"/cardinfo.php", nil)
+	if err != nil {
+		return nil, err
+	}
+	q := req.URL.Query()
+	q.Set("archetype", archetype)
+	req.URL.RawQuery = q.Encode()
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetching cards in archetype %q: %w", archetype, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("card API returned status %d for archetype %q", resp.StatusCode, archetype)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading archetype cards response: %w", err)
+	}
+
+	var cardResp YGOProCardResponse
+	if err := json.Unmarshal(body, &cardResp); err != nil {
+		return nil, fmt.Errorf("parsing archetype cards for %q: %w", archetype, err)
+	}
+
+	return cardResp.Data, nil
+}
+
 // FetchCardsBySet returns all cards in a specific set from YGOPRODECK.
 func (c *YGOProClient) FetchCardsBySet(setName string) ([]YGOProCard, error) {
 	c.rateLimiter.Wait()

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// ParseResponse is the top-level response from action=parse.
+// ParseResponse is the top-level response from action=parse with prop=wikitext.
 type ParseResponse struct {
 	Parse ParseResult `json:"parse"`
 }
@@ -96,12 +96,12 @@ type ImageInfoItem struct {
 	URL string `json:"url"`
 }
 
-// FetchGalleryImageNames returns all image filenames from a card's gallery page.
-// Returns nil if the gallery page doesn't exist.
-func (c *Client) FetchGalleryImageNames(cardName string) ([]string, error) {
+// FetchPageImages returns all image filenames from any Yugipedia page.
+// Returns nil if the page doesn't exist.
+func (c *Client) FetchPageImages(title string) ([]string, error) {
 	params := []Param{
 		{"action", "parse"},
-		{"page", "Card Gallery:" + cardName},
+		{"page", title},
 		{"prop", "images"},
 		{"format", "json"},
 	}
@@ -117,6 +117,12 @@ func (c *Client) FetchGalleryImageNames(cardName string) ([]string, error) {
 	}
 
 	return resp.Parse.Images, nil
+}
+
+// FetchGalleryImageNames returns all image filenames from a card's gallery page.
+// Returns nil if the gallery page doesn't exist.
+func (c *Client) FetchGalleryImageNames(cardName string) ([]string, error) {
+	return c.FetchPageImages("Card Gallery:" + cardName)
 }
 
 // FetchFileImageURL resolves a single Yugipedia filename to its direct download URL.

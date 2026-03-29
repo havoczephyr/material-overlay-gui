@@ -80,9 +80,13 @@ func (s *CardService) LookupCard(name string) (*card.Card, []byte, error) {
 		}
 	}
 
-	// Fetch card sets from YGOPRODECK
+	// Fetch card data from YGOPRODECK
 	ygoproCard, err := s.ygoproClient.FetchCardByName(cd.Name)
 	if err == nil && ygoproCard != nil {
+		// Use YGOPRODECK's plain text description instead of Yugipedia wikitext lore
+		if ygoproCard.Desc != "" {
+			cd.Lore = ygoproCard.Desc
+		}
 		for _, cs := range ygoproCard.CardSets {
 			cd.CardSets = append(cd.CardSets, card.CardSetEntry{
 				SetName: cs.SetName,
@@ -124,7 +128,7 @@ func (s *CardService) LoadRandomCard() (*api.YGOProCard, []byte, error) {
 	return ygoproCard, imgData, nil
 }
 
-// FetchTips fetches card tips from Yugipedia.
+// FetchTips fetches card tips and returns clean plain text.
 func (s *CardService) FetchTips(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardTips(cardName)
 	if err != nil {
@@ -133,7 +137,7 @@ func (s *CardService) FetchTips(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchTrivia fetches card trivia from Yugipedia.
+// FetchTrivia fetches card trivia and returns clean plain text.
 func (s *CardService) FetchTrivia(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardTrivia(cardName)
 	if err != nil {
@@ -142,7 +146,7 @@ func (s *CardService) FetchTrivia(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchRulings fetches card rulings from Yugipedia.
+// FetchRulings fetches card rulings and returns clean plain text.
 func (s *CardService) FetchRulings(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardRulings(cardName)
 	if err != nil {
@@ -151,33 +155,13 @@ func (s *CardService) FetchRulings(cardName string) (string, error) {
 	return card.StripWikiPageContent(raw), nil
 }
 
-// FetchErrata fetches card errata from Yugipedia.
+// FetchErrata fetches card errata and returns clean plain text.
 func (s *CardService) FetchErrata(cardName string) (string, error) {
 	raw, err := s.wikiClient.FetchCardErrata(cardName)
 	if err != nil {
 		return "", err
 	}
 	return card.StripWikiPageContent(raw), nil
-}
-
-// FetchTipsRaw fetches raw wiki text for tips (with [[links]] preserved for RichText).
-func (s *CardService) FetchTipsRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardTips(cardName)
-}
-
-// FetchTriviaRaw fetches raw wiki text for trivia.
-func (s *CardService) FetchTriviaRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardTrivia(cardName)
-}
-
-// FetchRulingsRaw fetches raw wiki text for rulings.
-func (s *CardService) FetchRulingsRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardRulings(cardName)
-}
-
-// FetchErrataRaw fetches raw wiki text for errata.
-func (s *CardService) FetchErrataRaw(cardName string) (string, error) {
-	return s.wikiClient.FetchCardErrata(cardName)
 }
 
 // FetchGalleryEntries fetches gallery image entries for a card.
@@ -248,6 +232,77 @@ func (s *CardService) FetchRecentSets(limit int) ([]api.YGOProSet, error) {
 // FetchCardsInSet returns all cards in a specific set.
 func (s *CardService) FetchCardsInSet(setName string) ([]api.YGOProCard, error) {
 	return s.ygoproClient.FetchCardsBySet(setName)
+}
+
+// FetchArchetypeArticle fetches the wiki article for an archetype as clean plain text.
+// Tries the plain name first, then falls back to "Name (archetype)".
+func (s *CardService) FetchArchetypeArticle(name string) (string, error) {
+	raw, err := s.wikiClient.FetchWikiPage(name)
+	if err != nil {
+		return "", err
+	}
+	if raw != "" {
+		return card.StripWikiPageContent(raw), nil
+	}
+	raw, err = s.wikiClient.FetchWikiPage(name + " (archetype)")
+	if err != nil {
+		return "", err
+	}
+	return card.StripWikiPageContent(raw), nil
+}
+
+// FetchArchetypeCards fetches all cards belonging to an archetype from YGOPRODECK.
+func (s *CardService) FetchArchetypeCards(name string) ([]api.YGOProCard, error) {
+	return s.ygoproClient.FetchCardsByArchetype(name)
+}
+
+// FetchArchetypeSplashImage fetches the first relevant image from the archetype's wiki page.
+func (s *CardService) FetchArchetypeSplashImage(name string) ([]byte, error) {
+	// Check disk cache
+	cacheKey := "archetype_" + name
+	data, err := s.imageCache.GetCachedImageByName(cacheKey)
+	if err == nil && data != nil {
+		return data, nil
+	}
+
+	// Try plain name first, then "(archetype)" variant
+	images, _ := s.wikiClient.FetchPageImages(name)
+	if len(images) == 0 {
+		images, _ = s.wikiClient.FetchPageImages(name + " (archetype)")
+	}
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no images found for archetype %q", name)
+	}
+
+	// Pick first image that looks like card art (skip icons/logos)
+	var filename string
+	for _, img := range images {
+		lower := strings.ToLower(img)
+		if strings.HasSuffix(lower, ".svg") {
+			continue
+		}
+		if strings.Contains(lower, "icon") || strings.Contains(lower, "logo") {
+			continue
+		}
+		filename = img
+		break
+	}
+	if filename == "" {
+		filename = images[0]
+	}
+
+	url, err := s.wikiClient.FetchFileImageURL(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = s.wikiClient.DownloadImage(url)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.imageCache.CacheImageByName(cacheKey, data)
+	return data, nil
 }
 
 // CategorizeRecentSets splits sets into packs and structure decks.

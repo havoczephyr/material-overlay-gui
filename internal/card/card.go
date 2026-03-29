@@ -132,8 +132,6 @@ var (
 	reRefBlock = regexp.MustCompile(`(?s)<ref[^>]*>.*?</ref>`)
 	// <ref .../> (self-closing references)
 	reRefSelf = regexp.MustCompile(`<ref[^/]*/\s*>`)
-	// {{template}} (non-nested — run multiple passes for nesting)
-	reTemplate = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 	// == Section Header == -> Section Header
 	reSectionHeader = regexp.MustCompile(`={2,}\s*(.*?)\s*={2,}`)
 	// any remaining HTML tags
@@ -156,37 +154,22 @@ func StripWikiMarkup(s string) string {
 }
 
 // StripWikiPageContent converts raw wikitext from a wiki page into readable plain text.
-// Handles bullets, templates, references, table markup, links, and formatting.
+// Strips all markup including links — produces clean text for display in labels.
 func StripWikiPageContent(s string) string {
 	if s == "" {
 		return ""
 	}
 
-	// Remove references
 	s = reRefBlock.ReplaceAllString(s, "")
 	s = reRefSelf.ReplaceAllString(s, "")
+	s = stripTemplates(s)
 
-	// Remove templates (multiple passes for nesting)
-	for i := 0; i < 5; i++ {
-		prev := s
-		s = reTemplate.ReplaceAllString(s, "")
-		if s == prev {
-			break
-		}
-	}
-
-	// Remove table markup
 	s = reTableStart.ReplaceAllString(s, "")
 	s = reTableEnd.ReplaceAllString(s, "")
 	s = reTableRowSep.ReplaceAllString(s, "")
 
-	// Strip section headers
 	s = reSectionHeader.ReplaceAllString(s, "$1")
-
-	// Strip bold before italic (''' before '')
 	s = reBold.ReplaceAllString(s, "$1")
-
-	// Apply standard wiki markup stripping
 	s = rePipeLink.ReplaceAllString(s, "$1")
 	s = reLink.ReplaceAllString(s, "$1")
 	s = reItalic.ReplaceAllString(s, "$1")
@@ -194,7 +177,6 @@ func StripWikiPageContent(s string) string {
 	s = reHTML.ReplaceAllString(s, "")
 	s = html.UnescapeString(s)
 
-	// Process lines: convert bullets, strip table cell prefixes, drop empties
 	var result []string
 	for _, line := range strings.Split(s, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -202,7 +184,6 @@ func StripWikiPageContent(s string) string {
 			continue
 		}
 
-		// Wiki bullet points (* or **) -> bullet character
 		if strings.HasPrefix(trimmed, "*") {
 			depth := 0
 			for _, ch := range trimmed {
@@ -219,7 +200,6 @@ func StripWikiPageContent(s string) string {
 			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
 		}
 
-		// Table header cells (! or !!)
 		if strings.HasPrefix(trimmed, "!") {
 			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
 			if trimmed == "" {
@@ -227,7 +207,6 @@ func StripWikiPageContent(s string) string {
 			}
 		}
 
-		// Table data cells (| prefix)
 		if strings.HasPrefix(trimmed, "|") {
 			trimmed = strings.TrimSpace(trimmed[1:])
 			if trimmed == "" {
@@ -239,6 +218,33 @@ func StripWikiPageContent(s string) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// stripTemplates removes all {{...}} template blocks, handling arbitrary nesting.
+func stripTemplates(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+			depth := 1
+			i += 2
+			for i < len(s) && depth > 0 {
+				if i+1 < len(s) && s[i] == '{' && s[i+1] == '{' {
+					depth++
+					i += 2
+				} else if i+1 < len(s) && s[i] == '}' && s[i+1] == '}' {
+					depth--
+					i += 2
+				} else {
+					i++
+				}
+			}
+		} else {
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
 }
 
 // WikiLink represents a card reference found in wiki text.
@@ -247,79 +253,6 @@ type WikiLink struct {
 	End     int    // byte offset end in the plain text output
 	Target  string // card name to navigate to (the link target)
 	Display string // display text shown to the user
-}
-
-// CleanWikiTextPreserveLinks applies the same cleanup as StripWikiPageContent
-// but keeps [[...]] link markup intact for later parsing.
-func CleanWikiTextPreserveLinks(s string) string {
-	if s == "" {
-		return ""
-	}
-
-	s = reRefBlock.ReplaceAllString(s, "")
-	s = reRefSelf.ReplaceAllString(s, "")
-
-	for i := 0; i < 5; i++ {
-		prev := s
-		s = reTemplate.ReplaceAllString(s, "")
-		if s == prev {
-			break
-		}
-	}
-
-	s = reTableStart.ReplaceAllString(s, "")
-	s = reTableEnd.ReplaceAllString(s, "")
-	s = reTableRowSep.ReplaceAllString(s, "")
-
-	s = reSectionHeader.ReplaceAllString(s, "$1")
-	s = reBold.ReplaceAllString(s, "$1")
-	s = reItalic.ReplaceAllString(s, "$1")
-	s = reBR.ReplaceAllString(s, "\n")
-	s = reHTML.ReplaceAllString(s, "")
-	s = html.UnescapeString(s)
-
-	// Process lines but preserve [[...]] links
-	var result []string
-	for _, line := range strings.Split(s, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-
-		if strings.HasPrefix(trimmed, "*") {
-			depth := 0
-			for _, ch := range trimmed {
-				if ch == '*' {
-					depth++
-				} else {
-					break
-				}
-			}
-			prefix := "• "
-			if depth > 1 {
-				prefix = "  • "
-			}
-			trimmed = prefix + strings.TrimSpace(trimmed[depth:])
-		}
-
-		if strings.HasPrefix(trimmed, "!") {
-			trimmed = strings.TrimSpace(strings.TrimLeft(trimmed, "!"))
-			if trimmed == "" {
-				continue
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "|") {
-			trimmed = strings.TrimSpace(trimmed[1:])
-			if trimmed == "" {
-				continue
-			}
-		}
-
-		result = append(result, trimmed)
-	}
-
-	return strings.Join(result, "\n")
 }
 
 // ParseWikiLinks extracts [[...]] links from cleaned wiki text.
@@ -389,3 +322,23 @@ func ParseWikiLinks(cleaned string) (string, []WikiLink) {
 
 	return out.String(), links
 }
+
+// ── Shared types for article parsing ────────────────────────────────────
+
+// WikiTable represents a parsed wiki table.
+type WikiTable struct {
+	Rows []WikiTableRow
+}
+
+// WikiTableRow represents a single row in a wiki table.
+type WikiTableRow struct {
+	Cells    []string
+	IsHeader bool
+}
+
+// ArticleSegment represents a part of a wiki article: either text or a table.
+type ArticleSegment struct {
+	Text  string     // non-empty for text segments (with [[links]] preserved)
+	Table *WikiTable // non-nil for table segments
+}
+
