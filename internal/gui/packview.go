@@ -103,5 +103,5 @@ func (a *App) packCardRow(card api.YGOProCard, setName string) fyne.CanvasObject
 	detailText := canvas.NewText(strings.Join(details, "  •  "), theme.ColorFGDim)
 	detailText.TextSize = 12
 
-	return container.NewVBox(nameBtn, detailText)
+	return container.NewVBox(newTappableButton(nameBtn), detailText)
 }

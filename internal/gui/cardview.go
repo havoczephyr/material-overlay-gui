@@ -242,6 +242,7 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 		loreHeader := sectionHeader("Effect / Flavor Text")
 		loreText := widget.NewLabel(cd.Lore)
 		loreText.Wrapping = fyne.TextWrapWord
+		loreText.Selectable = true
 		content.Add(loreHeader)
 		content.Add(loreText)
 		content.Add(layout.NewSpacer())
@@ -258,7 +259,7 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 				a.showArchetype(archName)
 			})
 			btn.Importance = widget.LowImportance
-			archRow.Add(btn)
+			archRow.Add(newTappableButton(btn))
 		}
 		content.Add(archRow)
 	}
@@ -285,6 +286,7 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 			}
 			setLabel := widget.NewLabel(setLine)
 			setLabel.Wrapping = fyne.TextWrapWord
+			setLabel.Selectable = true
 			content.Add(setLabel)
 		}
 	}
@@ -319,6 +321,7 @@ func (a *App) loadTabContent(cardName, tabType string, box *fyne.Container) {
 		// No RichText, no clickable links — just clean text that wraps properly.
 		label := widget.NewLabel(text)
 		label.Wrapping = fyne.TextWrapWord
+		label.Selectable = true
 		newContent = label
 	}
 

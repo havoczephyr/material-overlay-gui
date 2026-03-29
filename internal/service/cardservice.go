@@ -234,6 +234,43 @@ func (s *CardService) FetchCardsInSet(setName string) ([]api.YGOProCard, error) 
 	return s.ygoproClient.FetchCardsBySet(setName)
 }
 
+// SearchArchetypes searches for archetypes matching the query by substring match.
+func (s *CardService) SearchArchetypes(query string) ([]string, error) {
+	if cached, ok := s.cache.Get("archetypes:all"); ok {
+		if names, ok := cached.([]string); ok {
+			return filterArchetypesByQuery(names, query), nil
+		}
+	}
+
+	archetypes, err := s.ygoproClient.FetchAllArchetypes()
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(archetypes))
+	for i, a := range archetypes {
+		names[i] = a.Name
+	}
+
+	s.cache.Set("archetypes:all", names, cache.SetTTL)
+
+	return filterArchetypesByQuery(names, query), nil
+}
+
+func filterArchetypesByQuery(names []string, query string) []string {
+	q := strings.ToLower(query)
+	var results []string
+	for _, name := range names {
+		if strings.Contains(strings.ToLower(name), q) {
+			results = append(results, name)
+		}
+	}
+	if len(results) > 10 {
+		results = results[:10]
+	}
+	return results
+}
+
 // FetchArchetypeArticle fetches the wiki article for an archetype as clean plain text.
 // Tries the plain name first, then falls back to "Name (archetype)".
 func (s *CardService) FetchArchetypeArticle(name string) (string, error) {

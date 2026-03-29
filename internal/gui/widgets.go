@@ -6,6 +6,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/havoczephyr/material-overlay-gui/internal/theme"
@@ -135,4 +136,36 @@ func (t *tappableImage) CreateRenderer() fyne.WidgetRenderer {
 
 func (t *tappableImage) MinSize() fyne.Size {
 	return t.content.MinSize()
+}
+
+func (t *tappableImage) Cursor() desktop.Cursor {
+	return desktop.PointerCursor
+}
+
+// tappableButton wraps a widget.Button to show a pointer cursor on hover.
+type tappableButton struct {
+	widget.BaseWidget
+	btn *widget.Button
+}
+
+func newTappableButton(btn *widget.Button) *tappableButton {
+	t := &tappableButton{btn: btn}
+	t.ExtendBaseWidget(t)
+	return t
+}
+
+func (t *tappableButton) Tapped(e *fyne.PointEvent) {
+	t.btn.Tapped(e)
+}
+
+func (t *tappableButton) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.btn)
+}
+
+func (t *tappableButton) MinSize() fyne.Size {
+	return t.btn.MinSize()
+}
+
+func (t *tappableButton) Cursor() desktop.Cursor {
+	return desktop.PointerCursor
 }

@@ -3,6 +3,7 @@ package gui
 import (
 	"bytes"
 	"fmt"
+	"image/color"
 	"strings"
 	"sync"
 	"time"
@@ -54,23 +55,36 @@ func (a *App) showArchetype(name string) {
 }
 
 func (a *App) renderArchetypeView(name, article string, artErr error, imgData []byte, cards []api.YGOProCard, cardErr error) {
-	// ── Article section (splash art + article) ──
+	// ── Article section (compact upper-left header + scrollable article) ──
 	var imgWidget fyne.CanvasObject
 	if imgData != nil {
 		img := canvas.NewImageFromReader(bytes.NewReader(imgData), name)
 		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(170, 250))
+		img.SetMinSize(fyne.NewSize(85, 125))
 		imgWidget = img
 	} else {
 		rect := canvas.NewRectangle(theme.ColorBGLight)
-		rect.SetMinSize(fyne.NewSize(170, 250))
+		rect.SetMinSize(fyne.NewSize(85, 125))
 		rect.CornerRadius = 8
 		imgWidget = rect
 	}
 
+	// Fade overlay sits on top of the image — starts transparent, fades to BG color on scroll
+	bgR, bgG, bgB, _ := theme.ColorBG.RGBA()
+	fadeOverlay := canvas.NewRectangle(color.NRGBA{R: uint8(bgR >> 8), G: uint8(bgG >> 8), B: uint8(bgB >> 8), A: 0})
+	fadeOverlay.SetMinSize(fyne.NewSize(85, 125))
+	imgWithFade := container.NewStack(imgWidget, fadeOverlay)
+
 	nameText := canvas.NewText(name, theme.ColorPrimary)
-	nameText.TextSize = 18
+	nameText.TextSize = 14
 	nameText.TextStyle.Bold = true
+
+	subtitleText := canvas.NewText("Archetype", theme.ColorFGDim)
+	subtitleText.TextSize = 12
+
+	// Extract color components for scroll fade callback
+	pR, pG, pB, _ := theme.ColorPrimary.RGBA()
+	dimR, dimG, dimB, _ := theme.ColorFGDim.RGBA()
 
 	var articleWidget fyne.CanvasObject
 	if artErr != nil {
@@ -82,17 +96,46 @@ func (a *App) renderArchetypeView(name, article string, artErr error, imgData []
 	} else {
 		label := widget.NewLabel(article)
 		label.Wrapping = fyne.TextWrapWord
+		label.Selectable = true
 		articleWidget = label
 	}
 
-	// Sticky header: image + title fixed at top, article scrolls underneath
-	header := container.NewVBox(
-		container.NewCenter(imgWidget),
-		container.NewCenter(nameText),
+	// Compact header: thumbnail left, title + subtitle stacked right
+	header := container.NewHBox(
+		imgWithFade,
+		container.NewVBox(nameText, subtitleText),
 	)
+
+	articleScroll := container.NewVScroll(container.NewPadded(articleWidget))
+
+	// Scroll-based fade: title and thumbnail decrease in opacity as user scrolls down
+	const fadeDistance = float32(150)
+	articleScroll.OnScrolled = func(pos fyne.Position) {
+		ratio := pos.Y / fadeDistance
+		if ratio < 0 {
+			ratio = 0
+		}
+		if ratio > 1 {
+			ratio = 1
+		}
+
+		// Image fade overlay: transparent → opaque background color
+		overlayAlpha := uint8(ratio * 255)
+		fadeOverlay.FillColor = color.NRGBA{R: uint8(bgR >> 8), G: uint8(bgG >> 8), B: uint8(bgB >> 8), A: overlayAlpha}
+		fadeOverlay.Refresh()
+
+		// Title text: fully visible → invisible
+		textAlpha := uint8((1 - ratio) * 255)
+		nameText.Color = color.NRGBA{R: uint8(pR >> 8), G: uint8(pG >> 8), B: uint8(pB >> 8), A: textAlpha}
+		nameText.Refresh()
+
+		subtitleText.Color = color.NRGBA{R: uint8(dimR >> 8), G: uint8(dimG >> 8), B: uint8(dimB >> 8), A: textAlpha}
+		subtitleText.Refresh()
+	}
+
 	articleSection := container.NewBorder(
 		header, nil, nil, nil,
-		container.NewVScroll(container.NewPadded(articleWidget)),
+		articleScroll,
 	)
 
 	// ── Cards section ──
@@ -217,5 +260,5 @@ func (a *App) archetypeCardRow(c api.YGOProCard) fyne.CanvasObject {
 	detailText := canvas.NewText(strings.Join(details, "  •  "), theme.ColorFGDim)
 	detailText.TextSize = 12
 
-	return container.NewVBox(nameBtn, detailText)
+	return container.NewVBox(newTappableButton(nameBtn), detailText)
 }

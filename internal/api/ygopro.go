@@ -221,6 +221,38 @@ func (c *YGOProClient) FetchCardsByArchetype(archetype string) ([]YGOProCard, er
 	return cardResp.Data, nil
 }
 
+// YGOProArchetype represents an archetype entry from the YGOPRODECK API.
+type YGOProArchetype struct {
+	Name string `json:"archetype_name"`
+}
+
+// FetchAllArchetypes returns the full list of archetypes from YGOPRODECK.
+func (c *YGOProClient) FetchAllArchetypes() ([]YGOProArchetype, error) {
+	c.rateLimiter.Wait()
+
+	resp, err := c.httpClient.Get(ygoproBaseURL + "/archetypes.php")
+	if err != nil {
+		return nil, fmt.Errorf("fetching archetypes: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("archetypes API returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading archetypes response: %w", err)
+	}
+
+	var archetypes []YGOProArchetype
+	if err := json.Unmarshal(body, &archetypes); err != nil {
+		return nil, fmt.Errorf("parsing archetypes: %w", err)
+	}
+
+	return archetypes, nil
+}
+
 // FetchCardsBySet returns all cards in a specific set from YGOPRODECK.
 func (c *YGOProClient) FetchCardsBySet(setName string) ([]YGOProCard, error) {
 	c.rateLimiter.Wait()

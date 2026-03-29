@@ -206,6 +206,6 @@ func (a *App) buildRecentRow(row *fyne.Container) {
 			a.showCardByName(cardName)
 		})
 		btn.Importance = widget.LowImportance
-		row.Add(btn)
+		row.Add(newTappableButton(btn))
 	}
 }
