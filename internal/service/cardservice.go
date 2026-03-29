@@ -250,6 +250,73 @@ func (s *CardService) FetchCardsInSet(setName string) ([]api.YGOProCard, error) 
 	return s.ygoproClient.FetchCardsBySet(setName)
 }
 
+// FetchArchetypeArticle fetches the wiki article for an archetype.
+// Tries the plain name first, then falls back to "Name (archetype)".
+func (s *CardService) FetchArchetypeArticle(name string) (string, error) {
+	raw, err := s.wikiClient.FetchWikiPage(name)
+	if err != nil {
+		return "", err
+	}
+	if raw != "" {
+		return raw, nil
+	}
+	return s.wikiClient.FetchWikiPage(name + " (archetype)")
+}
+
+// FetchArchetypeCards fetches all cards belonging to an archetype from YGOPRODECK.
+func (s *CardService) FetchArchetypeCards(name string) ([]api.YGOProCard, error) {
+	return s.ygoproClient.FetchCardsByArchetype(name)
+}
+
+// FetchArchetypeSplashImage fetches the first relevant image from the archetype's wiki page.
+func (s *CardService) FetchArchetypeSplashImage(name string) ([]byte, error) {
+	// Check disk cache
+	cacheKey := "archetype_" + name
+	data, err := s.imageCache.GetCachedImageByName(cacheKey)
+	if err == nil && data != nil {
+		return data, nil
+	}
+
+	// Try plain name first, then "(archetype)" variant
+	images, _ := s.wikiClient.FetchPageImages(name)
+	if len(images) == 0 {
+		images, _ = s.wikiClient.FetchPageImages(name + " (archetype)")
+	}
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no images found for archetype %q", name)
+	}
+
+	// Pick first image that looks like card art (skip icons/logos)
+	var filename string
+	for _, img := range images {
+		lower := strings.ToLower(img)
+		if strings.HasSuffix(lower, ".svg") {
+			continue
+		}
+		if strings.Contains(lower, "icon") || strings.Contains(lower, "logo") {
+			continue
+		}
+		filename = img
+		break
+	}
+	if filename == "" {
+		filename = images[0]
+	}
+
+	url, err := s.wikiClient.FetchFileImageURL(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = s.wikiClient.DownloadImage(url)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.imageCache.CacheImageByName(cacheKey, data)
+	return data, nil
+}
+
 // CategorizeRecentSets splits sets into packs and structure decks.
 func CategorizeRecentSets(sets []api.YGOProSet) (packs, structures []api.YGOProSet) {
 	for _, s := range sets {

@@ -247,9 +247,20 @@ func (a *App) buildCardTextTab(cd *card.Card) fyne.CanvasObject {
 		content.Add(layout.NewSpacer())
 	}
 
-	// Archseries
+	// Archseries (clickable → archetype view)
 	if len(cd.Archseries) > 0 {
-		content.Add(labelValue("Archseries:  ", strings.Join(cd.Archseries, ", ")))
+		archLabel := canvas.NewText("Archseries:  ", theme.ColorFGDim)
+		archLabel.TextSize = 13
+		archRow := container.NewHBox(archLabel)
+		for _, arch := range cd.Archseries {
+			archName := arch
+			btn := widget.NewButton(archName, func() {
+				a.showArchetype(archName)
+			})
+			btn.Importance = widget.LowImportance
+			archRow.Add(btn)
+		}
+		content.Add(archRow)
 	}
 
 	// Password
