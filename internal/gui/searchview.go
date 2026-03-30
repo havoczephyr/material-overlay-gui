@@ -17,18 +17,27 @@ func (a *App) showSearch(query string) {
 	statusLabel := canvas.NewText("Searching for \""+query+"\"...", theme.ColorFGDim)
 	statusLabel.TextSize = 13
 
-	// Two result columns
+	// Three result columns
 	cardResultsList := container.NewVBox()
 	archetypeResultsList := container.NewVBox()
+	articleResultsList := container.NewVBox()
 
 	cardColumn := container.NewVBox(sectionHeader("Cards"), cardResultsList)
 	archColumn := container.NewVBox(sectionHeader("Archetypes"), archetypeResultsList)
+	articleColumn := container.NewVBox(sectionHeader("Wiki Articles"), articleResultsList)
+
+	// Three-column layout: Cards | Archetypes | Wiki Articles
+	rightSplit := container.NewHSplit(
+		container.NewVScroll(container.NewPadded(archColumn)),
+		container.NewVScroll(container.NewPadded(articleColumn)),
+	)
+	rightSplit.SetOffset(0.5)
 
 	resultsSplit := container.NewHSplit(
 		container.NewVScroll(container.NewPadded(cardColumn)),
-		container.NewVScroll(container.NewPadded(archColumn)),
+		rightSplit,
 	)
-	resultsSplit.SetOffset(0.65)
+	resultsSplit.SetOffset(0.4)
 
 	content := container.NewBorder(
 		container.NewPadded(container.NewVBox(header, statusLabel)),
@@ -40,17 +49,19 @@ func (a *App) showSearch(query string) {
 	go func() {
 		var (
 			cardResults []api.SearchResult
+			wikiResults []api.SearchResult
 			archResults []string
-			cardErr     error
+			pageErr     error
 			archErr     error
 			wg          sync.WaitGroup
 		)
 
 		wg.Add(2)
 
+		// Single wiki search → split into cards + wiki articles
 		go func() {
 			defer wg.Done()
-			cardResults, cardErr = a.svc.SearchCards(query)
+			cardResults, wikiResults, pageErr = a.svc.SearchAllPages(query)
 		}()
 
 		go func() {
@@ -62,8 +73,8 @@ func (a *App) showSearch(query string) {
 
 		// Build card result items
 		var cardItems []fyne.CanvasObject
-		if cardErr != nil {
-			cardItems = []fyne.CanvasObject{widget.NewLabel("Search failed: " + cardErr.Error())}
+		if pageErr != nil {
+			cardItems = []fyne.CanvasObject{widget.NewLabel("Search failed: " + pageErr.Error())}
 		} else if len(cardResults) == 0 {
 			dim := canvas.NewText("No card results.", theme.ColorFGDim)
 			dim.TextSize = 13
@@ -100,6 +111,26 @@ func (a *App) showSearch(query string) {
 			}
 		}
 
+		// Build wiki article result items
+		var articleItems []fyne.CanvasObject
+		if pageErr != nil {
+			// Already shown in cards column
+		} else if len(wikiResults) == 0 {
+			dim := canvas.NewText("No wiki articles.", theme.ColorFGDim)
+			dim.TextSize = 13
+			articleItems = []fyne.CanvasObject{dim}
+		} else {
+			for _, r := range wikiResults {
+				title := r.Title
+				btn := widget.NewButton(title, func() {
+					a.showArticle(title)
+				})
+				btn.Importance = widget.LowImportance
+				btn.Alignment = widget.ButtonAlignLeading
+				articleItems = append(articleItems, newTappableButton(btn))
+			}
+		}
+
 		fyne.Do(func() {
 			statusLabel.Text = ""
 			statusLabel.Refresh()
@@ -111,6 +142,10 @@ func (a *App) showSearch(query string) {
 				archetypeResultsList.Add(item)
 			}
 			archetypeResultsList.Refresh()
+			for _, item := range articleItems {
+				articleResultsList.Add(item)
+			}
+			articleResultsList.Refresh()
 		})
 	}()
 }

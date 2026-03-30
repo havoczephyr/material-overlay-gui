@@ -47,6 +47,35 @@ func (c *Client) SearchCards(query string, limit int) ([]SearchResult, error) {
 	return filterResults(resp.Query.Search), nil
 }
 
+// SearchWikiPages searches namespace 0 without filtering game-specific suffixes.
+func (c *Client) SearchWikiPages(query string, limit int) ([]SearchResult, error) {
+	params := []Param{
+		{"action", "query"},
+		{"list", "search"},
+		{"srsearch", query},
+		{"srnamespace", "0"},
+		{"srlimit", fmt.Sprintf("%d", limit)},
+		{"format", "json"},
+	}
+
+	body, err := c.doRequest(params)
+	if err != nil {
+		return nil, fmt.Errorf("searching wiki pages for %q: %w", query, err)
+	}
+
+	var resp SearchResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parsing wiki search response for %q: %w", query, err)
+	}
+
+	return resp.Query.Search, nil
+}
+
+// HasGameSuffix reports whether a title ends with a known game-specific suffix.
+func HasGameSuffix(title string) bool {
+	return hasGameSuffix(title)
+}
+
 func filterResults(results []SearchResult) []SearchResult {
 	var filtered []SearchResult
 	for _, r := range results {

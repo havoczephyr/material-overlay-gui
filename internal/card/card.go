@@ -3,6 +3,7 @@ package card
 import (
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/havoczephyr/material-overlay-gui/internal/api"
@@ -119,6 +120,7 @@ func (c *Card) IsPendulum() bool {
 
 var (
 	// [[display|text]] -> text
+	reFileTag  = regexp.MustCompile(`\[\[(File|Image):([^\]]+)\]\]`)
 	rePipeLink = regexp.MustCompile(`\[\[[^\]]*\|([^\]]*)\]\]`)
 	// [[link]] -> link
 	reLink = regexp.MustCompile(`\[\[([^\]]*)\]\]`)
@@ -340,5 +342,134 @@ type WikiTableRow struct {
 type ArticleSegment struct {
 	Text  string     // non-empty for text segments (with [[links]] preserved)
 	Table *WikiTable // non-nil for table segments
+}
+
+// WikiImage represents an image reference extracted from wikitext.
+type WikiImage struct {
+	Filename string // e.g. "NormalSummon-Diagram.png" (without "File:" prefix)
+	Caption  string // last non-keyword pipe segment, stripped of markup
+	Width    int    // parsed from "300px", default 300
+}
+
+// ContentSegment represents either a text block or an image reference in a parsed article.
+type ContentSegment struct {
+	Text  string     // non-empty for text segments
+	Image *WikiImage // non-nil for image segments
+}
+
+// imageKeywords are [[File:...]] parameters that are not captions.
+var imageKeywords = map[string]bool{
+	"thumb": true, "thumbnail": true, "frame": true, "frameless": true,
+	"border": true, "left": true, "right": true, "center": true, "none": true,
+	"upright": true, "baseline": true, "middle": true, "sub": true, "super": true,
+	"top": true, "text-top": true, "bottom": true, "text-bottom": true,
+}
+
+var reSizePx = regexp.MustCompile(`^\d+(x\d+)?px$`)
+
+// ParseArticleWithImages extracts [[File:...]] / [[Image:...]] tags from raw wikitext,
+// preserving their positions relative to the text. Returns an interleaved list of
+// text segments (plain text via StripWikiPageContent) and image segments.
+func ParseArticleWithImages(rawWikitext string) []ContentSegment {
+	if rawWikitext == "" {
+		return nil
+	}
+
+	matches := reFileTag.FindAllStringIndex(rawWikitext, -1)
+	if len(matches) == 0 {
+		// No images — return a single text segment
+		text := StripWikiPageContent(rawWikitext)
+		if text == "" {
+			return nil
+		}
+		return []ContentSegment{{Text: text}}
+	}
+
+	var segments []ContentSegment
+	prev := 0
+
+	for _, loc := range matches {
+		// Text before this image tag
+		if loc[0] > prev {
+			text := StripWikiPageContent(rawWikitext[prev:loc[0]])
+			if text != "" {
+				segments = append(segments, ContentSegment{Text: text})
+			}
+		}
+
+		// Parse the image tag
+		tag := rawWikitext[loc[0]:loc[1]]
+		img := parseFileTag(tag)
+		if img != nil {
+			segments = append(segments, ContentSegment{Image: img})
+		}
+
+		prev = loc[1]
+	}
+
+	// Text after the last image tag
+	if prev < len(rawWikitext) {
+		text := StripWikiPageContent(rawWikitext[prev:])
+		if text != "" {
+			segments = append(segments, ContentSegment{Text: text})
+		}
+	}
+
+	return segments
+}
+
+// parseFileTag parses a [[File:Name.png|thumb|300px|Caption]] tag into a WikiImage.
+func parseFileTag(tag string) *WikiImage {
+	// Strip [[ and ]]
+	inner := tag[2 : len(tag)-2]
+
+	// Remove "File:" or "Image:" prefix
+	if idx := strings.Index(inner, ":"); idx != -1 {
+		inner = inner[idx+1:]
+	} else {
+		return nil
+	}
+
+	parts := strings.Split(inner, "|")
+	if len(parts) == 0 {
+		return nil
+	}
+
+	img := &WikiImage{
+		Filename: strings.TrimSpace(parts[0]),
+		Width:    300,
+	}
+
+	// Walk remaining parts: keywords are skipped, size is parsed, last non-keyword is caption
+	var captionCandidate string
+	for _, p := range parts[1:] {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		lower := strings.ToLower(p)
+		if imageKeywords[lower] {
+			continue
+		}
+		if reSizePx.MatchString(lower) {
+			// Parse width from "300px" or "300x200px"
+			numStr := strings.TrimSuffix(lower, "px")
+			if xIdx := strings.Index(numStr, "x"); xIdx != -1 {
+				numStr = numStr[:xIdx]
+			}
+			if w, err := strconv.Atoi(numStr); err == nil && w > 0 {
+				img.Width = w
+			}
+			continue
+		}
+		// Anything else is a potential caption (last one wins)
+		captionCandidate = p
+	}
+
+	if captionCandidate != "" {
+		img.Caption = StripWikiMarkup(captionCandidate)
+	}
+
+	return img
 }
 

@@ -113,6 +113,26 @@ func (s *CardService) SearchCards(query string) ([]api.SearchResult, error) {
 	return s.wikiClient.SearchCards(query, 20)
 }
 
+// SearchAllPages performs a single wiki search and splits results into card results
+// (filtered by game suffix) and wiki article results (all, minus game suffixes).
+// Card results navigate to card views; wiki results navigate to article views.
+func (s *CardService) SearchAllPages(query string) (cards, wiki []api.SearchResult, err error) {
+	all, err := s.wikiClient.SearchWikiPages(query, 30)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, r := range all {
+		if api.HasGameSuffix(r.Title) {
+			continue
+		}
+		cards = append(cards, r)
+		wiki = append(wiki, r)
+	}
+
+	return cards, wiki, nil
+}
+
 // LoadRandomCard fetches a random card from YGOPRODECK.
 func (s *CardService) LoadRandomCard() (*api.YGOProCard, []byte, error) {
 	ygoproCard, err := s.ygoproClient.FetchRandomCard()
@@ -269,6 +289,88 @@ func filterArchetypesByQuery(names []string, query string) []string {
 		results = results[:10]
 	}
 	return results
+}
+
+// FetchGenericArticle fetches a wiki article with inline image positions preserved.
+func (s *CardService) FetchGenericArticle(title string) ([]card.ContentSegment, error) {
+	raw, err := s.wikiClient.FetchWikiPage(title)
+	if err != nil {
+		return nil, err
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("page %q not found", title)
+	}
+	return card.ParseArticleWithImages(raw), nil
+}
+
+// FetchArticleImage fetches and caches an image referenced in a wiki article.
+func (s *CardService) FetchArticleImage(filename string) ([]byte, error) {
+	cacheKey := "article_" + filename
+	data, err := s.imageCache.GetCachedImageByName(cacheKey)
+	if err == nil && data != nil {
+		return data, nil
+	}
+
+	url, err := s.wikiClient.FetchFileImageURL(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = s.wikiClient.DownloadImage(url)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.imageCache.CacheImageByName(cacheKey, data)
+	return data, nil
+}
+
+// FetchArticleSplashImage fetches the first relevant image from a wiki page for the header.
+func (s *CardService) FetchArticleSplashImage(title string) ([]byte, error) {
+	cacheKey := "article_splash_" + title
+	data, err := s.imageCache.GetCachedImageByName(cacheKey)
+	if err == nil && data != nil {
+		return data, nil
+	}
+
+	images, _ := s.wikiClient.FetchPageImages(title)
+	if len(images) == 0 {
+		return nil, fmt.Errorf("no images found for %q", title)
+	}
+
+	var filename string
+	for _, img := range images {
+		lower := strings.ToLower(img)
+		if strings.HasSuffix(lower, ".svg") {
+			continue
+		}
+		if strings.Contains(lower, "icon") || strings.Contains(lower, "logo") {
+			continue
+		}
+		filename = img
+		break
+	}
+	if filename == "" {
+		filename = images[0]
+	}
+
+	url, err := s.wikiClient.FetchFileImageURL(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err = s.wikiClient.DownloadImage(url)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = s.imageCache.CacheImageByName(cacheKey, data)
+	return data, nil
+}
+
+// FetchPageImages returns all image filenames from a wiki page.
+func (s *CardService) FetchPageImages(title string) ([]string, error) {
+	return s.wikiClient.FetchPageImages(title)
 }
 
 // FetchArchetypeArticle fetches the wiki article for an archetype as clean plain text.
